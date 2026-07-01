@@ -21,6 +21,7 @@ const OLLAMA_MODELS = [
 // ---------- State ----------
 let editor;
 let chatHistory = []; // {role, content}
+let lastMessageHadContext = false; // tracks whether last user msg included editor code
 
 // ---------- Monaco setup ----------
 require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
@@ -70,15 +71,159 @@ const statusEl = document.getElementById("status");
 function appendMessage(role, content) {
   const div = document.createElement("div");
   div.className = `msg ${role}`;
-  div.innerHTML = `<div class="role-label">${role === "user" ? "Ti" : "AI"}</div>${escapeHtml(content)}`;
+
+  const label = document.createElement("div");
+  label.className = "role-label";
+  label.textContent = role === "user" ? "Ti" : "AI";
+  div.appendChild(label);
+
+  if (role === "assistant") {
+    div.appendChild(renderAssistantMessage(content, lastMessageHadContext));
+  } else {
+    // User messages: plain text, safe by using textContent
+    const span = document.createElement("span");
+    span.textContent = content;
+    div.appendChild(span);
+  }
+
   chatLog.appendChild(div);
   chatLog.scrollTop = chatLog.scrollHeight;
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str;
-  return div.innerHTML;
+// ---------- Apply-to-editor helpers ----------
+
+/**
+ * Extract all fenced code blocks from a markdown-like AI response.
+ * Returns [{lang, code}] for each ```lang\n...\n``` block found.
+ */
+function extractCodeBlocks(text) {
+  const blocks = [];
+  const re = /```([^\n]*)\n([\s\S]*?)```/g;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const code = m[2].replace(/\n$/, ""); // trim single trailing newline
+    if (code) blocks.push({ lang: m[1].trim(), code });
+  }
+  return blocks;
+}
+
+/**
+ * Apply code to the Monaco editor.
+ * mode "cursor" → insert/replace current selection, preserving undo history.
+ * mode "replace" → replace entire file content, preserving undo history.
+ */
+function applyToEditor(code, mode) {
+  if (!editor) return;
+  const model = editor.getModel();
+  const range = mode === "replace"
+    ? model.getFullModelRange()
+    : editor.getSelection();
+  editor.pushUndoStop();
+  editor.executeEdits("chat-apply", [{ range, text: code, forceMoveMarkers: true }]);
+  editor.pushUndoStop();
+  editor.focus();
+  showEditorStatus("Primijenjeno ✓  (Ctrl+Z za poništavanje)");
+}
+
+function showEditorStatus(msg) {
+  const el = document.getElementById("editor-status");
+  if (!el) return;
+  el.textContent = msg;
+  clearTimeout(el._statusTimer);
+  el._statusTimer = setTimeout(() => { el.textContent = ""; }, 4000);
+}
+
+/** Build a styled code block element with "insert at cursor" and "replace editor" buttons. */
+function createCodeBlockEl(code, lang, hadContext, isSoleBlock) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "code-block-wrapper";
+
+  // Header: language label + action buttons
+  const header = document.createElement("div");
+  header.className = "code-block-header";
+
+  const langLabel = document.createElement("span");
+  langLabel.className = "code-lang";
+  langLabel.textContent = lang || "code";
+  header.appendChild(langLabel);
+
+  const btnGroup = document.createElement("div");
+  btnGroup.className = "code-block-btns";
+
+  // "Insert at cursor" button
+  const btnInsert = document.createElement("button");
+  btnInsert.className = "btn-code-action";
+  btnInsert.title = "Ubaci na poziciju kursora u editoru";
+  btnInsert.textContent = "↳ Na kursor";
+  btnInsert.addEventListener("click", (e) => { e.stopPropagation(); applyToEditor(code, "cursor"); });
+  btnGroup.appendChild(btnInsert);
+
+  // "Replace editor" button — highlighted when AI likely returned a full file
+  const btnReplace = document.createElement("button");
+  if (hadContext && isSoleBlock) {
+    // Context was sent → AI probably modified the whole file
+    btnReplace.className = "btn-code-action btn-code-replace btn-code-replace-highlight";
+    btnReplace.title = "Zamijeni cijeli sadržaj editora ovom verzijom fajla (Ctrl+Z za poništavanje)";
+    btnReplace.textContent = "⟳ Zamijeni fajl";
+  } else {
+    btnReplace.className = "btn-code-action btn-code-replace";
+    btnReplace.title = "Zamijeni cijeli sadržaj editora ovim kodom (Ctrl+Z za poništavanje)";
+    btnReplace.textContent = "⟳ Zamijeni editor";
+  }
+  btnReplace.addEventListener("click", (e) => { e.stopPropagation(); applyToEditor(code, "replace"); });
+  btnGroup.appendChild(btnReplace);
+
+  header.appendChild(btnGroup);
+  wrapper.appendChild(header);
+
+  // Code body
+  const pre = document.createElement("pre");
+  pre.className = "code-block-body";
+  pre.textContent = code;
+  wrapper.appendChild(pre);
+
+  return wrapper;
+}
+
+/**
+ * Render an assistant message, splitting plain text and fenced code blocks.
+ * Code blocks get inline "apply to editor" buttons.
+ */
+function renderAssistantMessage(content, hadContext) {
+  const frag = document.createDocumentFragment();
+  const re = /```([^\n]*)\n([\s\S]*?)```/g;
+  let lastIdx = 0;
+  let match;
+
+  const allBlocks = extractCodeBlocks(content);
+  const isSoleBlock = allBlocks.length === 1;
+
+  while ((match = re.exec(content)) !== null) {
+    // Text before this code block
+    if (match.index > lastIdx) {
+      const span = document.createElement("span");
+      span.className = "msg-text";
+      span.textContent = content.slice(lastIdx, match.index);
+      frag.appendChild(span);
+    }
+
+    const lang = match[1].trim();
+    const code = match[2].replace(/\n$/, "");
+    if (code) {
+      frag.appendChild(createCodeBlockEl(code, lang, hadContext, isSoleBlock));
+    }
+    lastIdx = re.lastIndex;
+  }
+
+  // Remaining text after the last code block (or the full content if no blocks)
+  if (lastIdx < content.length) {
+    const span = document.createElement("span");
+    span.className = "msg-text";
+    span.textContent = content.slice(lastIdx);
+    frag.appendChild(span);
+  }
+
+  return frag;
 }
 
 async function sendChat() {
@@ -92,6 +237,7 @@ async function sendChat() {
     finalUserContent = `Fajl: ${filename}\n\`\`\`\n${code}\n\`\`\`\n\nPitanje: ${userText}`;
   }
 
+  lastMessageHadContext = includeContext.checked;
   appendMessage("user", userText);
   chatHistory.push({ role: "user", content: finalUserContent });
   chatInput.value = "";
