@@ -193,18 +193,37 @@
       flex-direction: column;
     }
 
+    /*
+     * Editor grows to fill whatever space the chat-pane doesn't need.
+     * This eliminates the empty black gap: when chat-log is empty the
+     * editor expands to nearly full height; it shrinks as messages appear.
+     */
     #editor-pane {
       width: 100%;
-      height: 38vh;
-      flex-shrink: 0;
+      flex: 1 1 0;        /* grow to fill available space, can shrink */
+      min-height: 30vh;
+      min-height: 30dvh;  /* always keep at least 30 % of the viewport */
       border-right: none;
       border-bottom: 1px solid var(--border);
     }
 
+    /*
+     * Chat-pane wraps to content height instead of claiming all remaining
+     * space. Together with the chat-log override below this removes the
+     * forced empty area.
+     */
     #chat-pane {
       width: 100%;
-      flex: 1;
+      flex: 0 0 auto;     /* take only what the content needs */
       min-height: 0;
+    }
+
+    /* Don't let the empty log balloon to fill the pane; cap when full. */
+    #chat-log {
+      flex: 0 1 auto;     /* override the global flex:1 */
+      max-height: 40vh;
+      max-height: 40dvh;
+      overflow-y: auto;
     }
 
     /* Touch-friendly targets (≥ 44 px) */
