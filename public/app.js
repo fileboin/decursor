@@ -170,13 +170,83 @@ async function githubPull() {
     return;
   }
 
+  const parts = repo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    ghStatus.textContent = "Repo mora biti u formatu owner/repo";
+    return;
+  }
+  const [owner, repoName] = parts;
+
   ghStatus.textContent = "Učitavam...";
   try {
-    const url = `https://api.github.com/repos/${repo}/contents/${encodeURIComponent(path)}?ref=${encodeURIComponent(branch)}`;
-    const res = await fetch(url, {
-      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+    const res = await fetch(`${BACKEND_BASE}/api/github/pull`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, owner, repo: repoName, branch, path }),
     });
     const data = await res.json();
 
     if (!res.ok) {
-      g
+      ghStatus.textContent = `Greška: ${data.error || "nepoznata greška"}`;
+      return;
+    }
+
+    if (editor) editor.setValue(data.content || "");
+    document.getElementById("filename-input").value = path.split("/").pop();
+    updateLanguageFromFilename();
+    ghStatus.textContent = `Učitano: ${path} (${branch})`;
+  } catch (err) {
+    ghStatus.textContent = `Greška konekcije: ${err.message}`;
+  }
+}
+
+async function githubPush() {
+  saveGhSettings();
+  const token = document.getElementById("gh-token").value.trim();
+  const repo = document.getElementById("gh-repo").value.trim();
+  const branch = document.getElementById("gh-branch").value.trim() || "main";
+  const path = document.getElementById("gh-path").value.trim();
+
+  if (!token || !repo || !path) {
+    ghStatus.textContent = "Popuni token, repo i putanju fajla.";
+    return;
+  }
+
+  const parts = repo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    ghStatus.textContent = "Repo mora biti u formatu owner/repo";
+    return;
+  }
+  const [owner, repoName] = parts;
+
+  if (!editor) {
+    ghStatus.textContent = "Editor nije spreman.";
+    return;
+  }
+
+  const content = editor.getValue();
+  const filename = document.getElementById("filename-input").value || path.split("/").pop();
+  const message = `Update ${filename} via Decursor`;
+
+  ghStatus.textContent = "Saljem...";
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/github/push`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, owner, repo: repoName, branch, path, content, message }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      ghStatus.textContent = `Greška: ${data.error || "nepoznata greška"}`;
+      return;
+    }
+
+    ghStatus.textContent = `Sačuvano! Commit: ${data.commit || "ok"}`;
+  } catch (err) {
+    ghStatus.textContent = `Greška konekcije: ${err.message}`;
+  }
+}
+
+document.getElementById("gh-pull-btn").addEventListener("click", githubPull);
+document.getElementById("gh-push-btn").addEventListener("click", githubPush);
