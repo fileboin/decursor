@@ -1,60 +1,56 @@
 // ---------- Config ----------
 const BACKEND_BASE = ""; // same origin as this page (Render serves both)
 
-// Grouped OpenRouter model list. Model IDs verified via GET https://openrouter.ai/api/v1/models.
+// Grouped OpenRouter model list.
+// IDs and prices fetched live on 2026-07-01 from GET https://openrouter.ai/api/v1/models.
+// Price format: "$<prompt>/$<completion> per M tokens".
 const OPENROUTER_MODELS = [
   {
+    // pricing.prompt === "0" in the API response
     group: "Besplatni",
     models: [
-      { id: "meta-llama/llama-3.1-8b-instruct:free",          label: "Llama 3.1 8B" },
-      { id: "meta-llama/llama-3.2-3b-instruct:free",          label: "Llama 3.2 3B" },
-      { id: "meta-llama/llama-3.3-70b-instruct:free",         label: "Llama 3.3 70B" },
-      { id: "google/gemini-flash-1.5:free",                   label: "Gemini Flash 1.5" },
-      { id: "google/gemma-4-31b-it:free",                     label: "Gemma 4 31B" },
-      { id: "qwen/qwen3-coder:free",                          label: "Qwen3 Coder 480B" },
-      { id: "qwen/qwen3-next-80b-a3b-instruct:free",          label: "Qwen3 Next 80B" },
-      { id: "nousresearch/hermes-3-llama-3.1-405b:free",      label: "Hermes 3 405B" },
-      { id: "nvidia/nemotron-3-super-120b-a12b:free",         label: "Nemotron 3 Super 120B" },
-      { id: "openai/gpt-oss-20b:free",                        label: "GPT OSS 20B" },
-      { id: "cohere/north-mini-code:free",                    label: "Cohere North Mini Code" },
+      { id: "google/gemma-4-31b-it:free",                    label: "Gemma 4 31B (besplatno)" },
+      { id: "openai/gpt-oss-120b:free",                      label: "GPT OSS 120B (besplatno)" },
+      { id: "qwen/qwen3-next-80b-a3b-instruct:free",         label: "Qwen3 Next 80B (besplatno)" },
+      { id: "nvidia/nemotron-3-ultra-550b-a55b:free",        label: "Nemotron 3 Ultra 550B (besplatno)" },
+      { id: "nvidia/nemotron-3-super-120b-a12b:free",        label: "Nemotron 3 Super 120B (besplatno)" },
+      { id: "cohere/north-mini-code:free",                   label: "Cohere North Mini Code (besplatno)" },
     ],
   },
   {
-    group: "Plaćeni — opšti",
+    // Prices from API: claude-sonnet-5 prompt=0.000002, completion=0.00001 (per token)
+    group: "Claude (Anthropic)",
     models: [
-      { id: "openai/gpt-4o-mini",                             label: "GPT-4o mini" },
-      { id: "openai/gpt-4o",                                  label: "GPT-4o" },
-      { id: "openai/gpt-4.1-mini",                            label: "GPT-4.1 Mini" },
-      { id: "openai/gpt-4.1",                                 label: "GPT-4.1" },
-      { id: "anthropic/claude-3.5-sonnet",                    label: "Claude 3.5 Sonnet" },
-      { id: "anthropic/claude-haiku-4.5",                     label: "Claude Haiku 4.5" },
-      { id: "anthropic/claude-sonnet-4",                      label: "Claude Sonnet 4" },
-      { id: "anthropic/claude-opus-4",                        label: "Claude Opus 4" },
-      { id: "google/gemini-2.5-flash",                        label: "Gemini 2.5 Flash" },
-      { id: "google/gemini-2.5-pro",                          label: "Gemini 2.5 Pro" },
-      { id: "deepseek/deepseek-chat",                         label: "DeepSeek V3 (cheap)" },
-      { id: "deepseek/deepseek-chat-v3-0324",                 label: "DeepSeek V3 0324" },
-      { id: "meta-llama/llama-4-scout",                       label: "Llama 4 Scout" },
-      { id: "meta-llama/llama-4-maverick",                    label: "Llama 4 Maverick" },
-      { id: "mistralai/mistral-small-3.2-24b-instruct",       label: "Mistral Small 3.2 24B" },
-      { id: "mistralai/mistral-large-2512",                   label: "Mistral Large 3" },
-      { id: "x-ai/grok-4.20",                                 label: "Grok 4.20" },
-      { id: "x-ai/grok-4.3",                                  label: "Grok 4.3" },
+      { id: "anthropic/claude-sonnet-5",   label: "Claude Sonnet 5 ($2/$10 per M)" },
+      { id: "anthropic/claude-opus-4.8",   label: "Claude Opus 4.8 ($5/$25 per M)" },
+      { id: "anthropic/claude-haiku-4.5",  label: "Claude Haiku 4.5 ($1/$5 per M)" },
     ],
   },
   {
-    group: "Plaćeni — coding / reasoning",
+    // Prices from API: gemini-2.5-flash prompt=0.0000003, completion=0.0000025 (per token)
+    group: "Gemini (Google)",
     models: [
-      { id: "qwen/qwen-2.5-coder-32b-instruct",              label: "Qwen 2.5 Coder 32B" },
-      { id: "qwen/qwen3-coder",                               label: "Qwen3 Coder 480B" },
-      { id: "mistralai/codestral-2508",                       label: "Codestral 2508" },
-      { id: "mistralai/devstral-2512",                        label: "Devstral 2512" },
-      { id: "deepseek/deepseek-r1",                           label: "DeepSeek R1" },
-      { id: "deepseek/deepseek-r1-0528",                      label: "DeepSeek R1 0528" },
-      { id: "openai/o3-mini",                                 label: "o3 Mini" },
-      { id: "openai/o4-mini",                                 label: "o4 Mini" },
-      { id: "moonshotai/kimi-k2.7-code",                      label: "Kimi K2.7 Code" },
-      { id: "arcee-ai/coder-large",                           label: "Arcee Coder Large" },
+      { id: "google/gemini-2.5-flash-lite", label: "Gemini 2.5 Flash Lite ($0.10/$0.40 per M)" },
+      { id: "google/gemini-2.5-flash",      label: "Gemini 2.5 Flash ($0.30/$2.50 per M)" },
+      { id: "google/gemini-2.5-pro",        label: "Gemini 2.5 Pro ($1.25/$10 per M)" },
+    ],
+  },
+  {
+    // Prices from API: deepseek-v4-pro prompt=0.000000435, completion=0.00000087 (per token)
+    group: "DeepSeek / Coding",
+    models: [
+      { id: "deepseek/deepseek-v4-flash",  label: "DeepSeek V4 Flash ($0.09/$0.18 per M)" },
+      { id: "deepseek/deepseek-v4-pro",    label: "DeepSeek V4 Pro ($0.44/$0.87 per M)" },
+      { id: "deepseek/deepseek-v3.2",      label: "DeepSeek V3.2 ($0.23/$0.34 per M)" },
+      { id: "deepseek/deepseek-r1-0528",   label: "DeepSeek R1 0528 ($0.50/$2.15 per M)" },
+    ],
+  },
+  {
+    // Prices from API: glm-5.2 prompt=0.00000093, completion=0.000003 (per token)
+    group: "Ostali jaki modeli",
+    models: [
+      { id: "z-ai/glm-5.2",          label: "GLM 5.2 ($0.93/$3 per M)" },
+      { id: "minimax/minimax-m3",    label: "MiniMax M3 ($0.30/$1.20 per M)" },
     ],
   },
 ];
