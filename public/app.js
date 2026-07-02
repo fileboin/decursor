@@ -1335,31 +1335,54 @@ document.getElementById("wp-draft-close-btn").addEventListener("click", () => {
   document.getElementById("wp-draft-modal").classList.remove("open");
 });
 
-// ---------- Theme toggle ----------
+// ---------- Home menu ----------
+
+const homeBtn = document.getElementById("home-btn");
+const homeDropdown = document.getElementById("home-dropdown");
+
+homeBtn.addEventListener("click", (e) => {
+  e.stopPropagation();
+  homeDropdown.classList.toggle("hidden");
+  if (!homeDropdown.classList.contains("hidden")) syncThemeBtnStates();
+});
+
+document.addEventListener("click", (e) => {
+  if (!homeDropdown.classList.contains("hidden") &&
+      !homeBtn.contains(e.target) &&
+      !homeDropdown.contains(e.target)) {
+    homeDropdown.classList.add("hidden");
+  }
+});
+
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") homeDropdown.classList.add("hidden");
+});
+
+// ---------- Theme toggle (in Home menu) ----------
 
 function applyTheme(theme) {
   document.documentElement.setAttribute("data-theme", theme);
   localStorage.setItem("decursor-theme", theme);
-  const btn = document.getElementById("theme-toggle-btn");
-  if (btn) btn.textContent = theme === "dark" ? "☀️" : "🌙";
   if (editor) monaco.editor.setTheme(theme === "dark" ? "vs-dark" : "vs");
   const metaColor = document.getElementById("meta-theme-color");
   if (metaColor) metaColor.content = theme === "dark" ? "#1e1e1e" : "#f0f0f0";
+  syncThemeBtnStates();
 }
 
-document.getElementById("theme-toggle-btn").addEventListener("click", () => {
+function syncThemeBtnStates() {
   const current = document.documentElement.getAttribute("data-theme") || "dark";
-  applyTheme(current === "dark" ? "light" : "dark");
-});
+  const lightBtn = document.getElementById("theme-light-btn");
+  const darkBtn = document.getElementById("theme-dark-btn");
+  if (lightBtn) lightBtn.classList.toggle("dd-active", current === "light");
+  if (darkBtn) darkBtn.classList.toggle("dd-active", current === "dark");
+}
 
-// Sync button icon with the theme that was already applied by the flash-prevention script
-(function initThemeBtn() {
-  const current = document.documentElement.getAttribute("data-theme") || "dark";
-  const btn = document.getElementById("theme-toggle-btn");
-  if (btn) btn.textContent = current === "dark" ? "☀️" : "🌙";
-})();
+document.getElementById("theme-light-btn").addEventListener("click", () => { applyTheme("light"); });
+document.getElementById("theme-dark-btn").addEventListener("click", () => { applyTheme("dark"); });
 
-// ---------- Font-size controls ----------
+syncThemeBtnStates();
+
+// ---------- Font-size controls (in Home menu) ----------
 
 const FONT_MIN = 12;
 const FONT_MAX = 22;
@@ -1379,6 +1402,21 @@ document.getElementById("font-decrease-btn").addEventListener("click", () => {
 document.getElementById("font-increase-btn").addEventListener("click", () => {
   const current = parseInt(document.documentElement.style.getPropertyValue("--base-font-size")) || 13;
   applyFontSize(current + 1);
+});
+
+// ---------- Pay to Use modal ----------
+
+document.getElementById("pay-to-use-btn").addEventListener("click", () => {
+  homeDropdown.classList.add("hidden");
+  document.getElementById("pay-modal").classList.add("open");
+});
+
+document.getElementById("pay-modal-close-btn").addEventListener("click", () => {
+  document.getElementById("pay-modal").classList.remove("open");
+});
+
+document.getElementById("pay-modal").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
 });
 
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
