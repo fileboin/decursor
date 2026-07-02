@@ -661,6 +661,7 @@
       padding: 6px 8px;
     }
     #provider-select,
+    #model-search,
     #model-select {
       flex: 1;
       min-width: 0;
@@ -948,6 +949,15 @@
     <option value="openrouter">OpenRouter</option>
     <option value="ollama">Ollama (self-hosted)</option>
   </select>
+
+  <input
+    id="model-search"
+    type="search"
+    placeholder="Pretraži modele..."
+    style="display:none"
+    title="Filtriraj prikazane modele (ne menja šta backend vraća)"
+    autocomplete="off"
+  />
 
   <select id="model-select">
     <!-- populated by app.js via /api/models -->

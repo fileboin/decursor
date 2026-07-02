@@ -495,10 +495,12 @@ app.post("/api/exec", (req, res) => {
 // ─── GET /api/models ──────────────────────────────────────────────────────────
 /**
  * GET /api/models?provider=openrouter|ollama[&ollamaUrl=...]
- * Returns [{id, name}] for the requested provider.
+ * Returns [{id, name, pricing, context_length, description}] for the requested provider.
  * OpenRouter endpoint is public (no auth header needed).
  * Ollama uses the configured OLLAMA_URL or the ollamaUrl query param.
  */
+// NIKAD ne filtriraj/ograničavaj listu modela sa OpenRouter-a. Vraćaj sve što API vrati.
+// Ako se ovaj endpoint ikad menja, ovo pravilo ostaje.
 app.get("/api/models", async (req, res) => {
   const { provider, ollamaUrl: queryOllamaUrl } = req.query;
 
@@ -513,9 +515,14 @@ app.get("/api/models", async (req, res) => {
         return res.status(response.status).json({ error: "Failed to fetch OpenRouter models" });
       }
       const data = await response.json();
-      const models = (data.data || [])
-        .slice(0, 30)
-        .map((m) => ({ id: m.id, name: m.name || m.id }));
+      // NIKAD ne filtriraj/ograničavaj listu modela sa OpenRouter-a. Vraćaj sve što API vrati.
+      const models = (data.data || []).map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        pricing: m.pricing || null,
+        context_length: m.context_length || null,
+        description: m.description || null,
+      }));
       return res.json(models);
     } catch (err) {
       console.error("[models/openrouter] error:", err);
