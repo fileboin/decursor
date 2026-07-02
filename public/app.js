@@ -1340,10 +1340,41 @@ document.getElementById("wp-draft-close-btn").addEventListener("click", () => {
 const homeBtn = document.getElementById("home-btn");
 const homeDropdown = document.getElementById("home-dropdown");
 
+/**
+ * Position the dropdown using viewport-relative coordinates so that
+ * no ancestor overflow:hidden can clip it (it uses position:fixed).
+ */
+function positionHomeDropdown() {
+  const rect = homeBtn.getBoundingClientRect();
+  const gap = 6;
+  let top = rect.bottom + gap;
+  let left = rect.left;
+
+  // Prevent right-edge overflow
+  const ddWidth = homeDropdown.offsetWidth || 220;
+  if (left + ddWidth > window.innerWidth - 12) {
+    left = Math.max(8, window.innerWidth - ddWidth - 12);
+  }
+  // Prevent bottom-edge overflow (rare but possible on very small screens)
+  const ddHeight = homeDropdown.scrollHeight || 160;
+  if (top + ddHeight > window.innerHeight - 8) {
+    top = Math.max(8, rect.top - ddHeight - gap);
+  }
+
+  homeDropdown.style.top  = top  + "px";
+  homeDropdown.style.left = left + "px";
+}
+
 homeBtn.addEventListener("click", (e) => {
   e.stopPropagation();
-  homeDropdown.classList.toggle("hidden");
-  if (!homeDropdown.classList.contains("hidden")) syncThemeBtnStates();
+  const isHidden = homeDropdown.classList.contains("hidden");
+  if (isHidden) {
+    homeDropdown.classList.remove("hidden");
+    positionHomeDropdown();
+    syncThemeBtnStates();
+  } else {
+    homeDropdown.classList.add("hidden");
+  }
 });
 
 document.addEventListener("click", (e) => {
@@ -1354,9 +1385,26 @@ document.addEventListener("click", (e) => {
   }
 });
 
+// Also close on touch-outside (touchstart fires before click on mobile)
+document.addEventListener("touchstart", (e) => {
+  if (!homeDropdown.classList.contains("hidden") &&
+      !homeBtn.contains(e.target) &&
+      !homeDropdown.contains(e.target)) {
+    homeDropdown.classList.add("hidden");
+  }
+}, { passive: true });
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") homeDropdown.classList.add("hidden");
 });
+
+// Reposition on resize/scroll so the dropdown stays anchored to the button
+window.addEventListener("resize", () => {
+  if (!homeDropdown.classList.contains("hidden")) positionHomeDropdown();
+});
+document.addEventListener("scroll", () => {
+  if (!homeDropdown.classList.contains("hidden")) positionHomeDropdown();
+}, { passive: true, capture: true });
 
 // ---------- Theme toggle (in Home menu) ----------
 
@@ -1394,14 +1442,20 @@ function applyFontSize(size) {
   if (editor) editor.updateOptions({ fontSize: size });
 }
 
+function getCurrentFontSize() {
+  // Prefer inline style (set by applyFontSize), fall back to computed stylesheet value
+  const inline = parseInt(document.documentElement.style.getPropertyValue("--base-font-size"));
+  if (!isNaN(inline) && inline >= FONT_MIN && inline <= FONT_MAX) return inline;
+  const computed = parseInt(getComputedStyle(document.documentElement).getPropertyValue("--base-font-size"));
+  return (!isNaN(computed) && computed >= FONT_MIN && computed <= FONT_MAX) ? computed : 13;
+}
+
 document.getElementById("font-decrease-btn").addEventListener("click", () => {
-  const current = parseInt(document.documentElement.style.getPropertyValue("--base-font-size")) || 13;
-  applyFontSize(current - 1);
+  applyFontSize(getCurrentFontSize() - 1);
 });
 
 document.getElementById("font-increase-btn").addEventListener("click", () => {
-  const current = parseInt(document.documentElement.style.getPropertyValue("--base-font-size")) || 13;
-  applyFontSize(current + 1);
+  applyFontSize(getCurrentFontSize() + 1);
 });
 
 // ---------- Pay to Use modal ----------
