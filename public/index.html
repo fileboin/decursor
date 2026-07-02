@@ -480,6 +480,123 @@
   }
   .btn-run-terminal:hover { background: #2d1a4a; color: #fff; }
 
+  /* ── Diff preview modal ── */
+  #diff-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 12px;
+  }
+  #diff-modal.open { display: flex; }
+  #diff-modal-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    width: 92%;
+    max-width: 780px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 82vh;
+    max-height: 82dvh;
+    overflow: hidden;
+  }
+  #diff-modal-content h2 { margin: 0; font-size: 15px; }
+  #diff-modal-subtitle {
+    font-size: 11px;
+    opacity: 0.55;
+    margin-top: -4px;
+  }
+  #diff-view {
+    flex: 1;
+    overflow-y: auto;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    background: #141414;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 4px 0;
+    min-height: 60px;
+  }
+  .diff-line {
+    padding: 1px 12px;
+    white-space: pre;
+    display: block;
+    overflow-x: auto;
+  }
+  .diff-line-added    { background: #122112; color: #4ec94e; }
+  .diff-line-removed  { background: #2a1212; color: #f48771; text-decoration: line-through; }
+  .diff-line-unchanged { color: #555; }
+  #diff-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #diff-accept-btn {
+    background: #1a3a1a;
+    color: #4ec94e;
+    border: 1px solid #2d5a2d;
+  }
+  #diff-accept-btn:hover { background: #2d5a2d; color: #fff; }
+
+  /* ── Exec confirm modal ── */
+  #exec-confirm-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    align-items: center;
+    justify-content: center;
+    z-index: 200;
+    padding: 12px;
+  }
+  #exec-confirm-modal.open { display: flex; }
+  #exec-confirm-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    width: 90%;
+    max-width: 580px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  #exec-confirm-content h2 { margin: 0; font-size: 15px; }
+  #exec-confirm-content p  { margin: 0; font-size: 12px; opacity: 0.65; }
+  #exec-confirm-cmd {
+    background: #0d0d0d;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    color: #4ec94e;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 0;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  #exec-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  #exec-accept-btn {
+    background: #1a1030;
+    color: #c586c0;
+    border: 1px solid #4d2d7a;
+  }
+  #exec-accept-btn:hover { background: #2d1a4a; color: #fff; }
+
   /* ── Mobile responsive (≤ 768 px) ── */
   @media (max-width: 768px) {
     #layout {
@@ -599,6 +716,34 @@
     #github-modal-actions button {
       width: 100%;
     }
+
+    #diff-modal {
+      align-items: flex-end;
+      padding: 0;
+    }
+    #diff-modal-content {
+      width: 100%;
+      max-width: 100%;
+      border-radius: 12px 12px 0 0;
+      max-height: 90vh;
+      max-height: 90dvh;
+      padding: 16px 16px 24px;
+    }
+    #diff-modal-actions { flex-direction: column; }
+    #diff-modal-actions button { width: 100%; }
+
+    #exec-confirm-modal {
+      align-items: flex-end;
+      padding: 0;
+    }
+    #exec-confirm-content {
+      width: 100%;
+      max-width: 100%;
+      border-radius: 12px 12px 0 0;
+      padding: 16px 16px 24px;
+    }
+    #exec-confirm-actions { flex-direction: column; }
+    #exec-confirm-actions button { width: 100%; }
   }
 </style>
 </head>
@@ -711,6 +856,32 @@
       <button class="secondary" id="gh-close-btn">Zatvori</button>
     </div>
     <span id="gh-status" style="font-size:11px; opacity:0.7;"></span>
+  </div>
+</div>
+
+<!-- Diff preview modal -->
+<div id="diff-modal">
+  <div id="diff-modal-content">
+    <h2>Pregled izmjena</h2>
+    <span id="diff-modal-subtitle"></span>
+    <div id="diff-view"></div>
+    <div id="diff-modal-actions">
+      <button id="diff-accept-btn">✓ Prihvati i sačuvaj</button>
+      <button class="secondary" id="diff-reject-btn">✗ Odbaci</button>
+    </div>
+  </div>
+</div>
+
+<!-- Exec confirm modal -->
+<div id="exec-confirm-modal">
+  <div id="exec-confirm-content">
+    <h2>Pokretanje komande u terminalu</h2>
+    <p>Sljedeća komanda će biti izvršena na serveru:</p>
+    <pre id="exec-confirm-cmd"></pre>
+    <div id="exec-confirm-actions">
+      <button id="exec-accept-btn">▶ Pokreni</button>
+      <button class="secondary" id="exec-reject-btn">Otkaži</button>
+    </div>
   </div>
 </div>
 
