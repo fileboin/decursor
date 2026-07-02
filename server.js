@@ -547,6 +547,128 @@ app.get("/api/models", async (req, res) => {
   return res.status(400).json({ error: `Unknown provider: ${provider}` });
 });
 
+// ─── WordPress integration ────────────────────────────────────────────────────
+
+/**
+ * POST /api/wordpress/publish
+ * body: { siteUrl, username, appPassword, title, content, status?, featuredImageUrl? }
+ * content: already-converted HTML (markdown→HTML is done on the frontend via marked.js)
+ * status: "draft" | "publish" — defaults to "draft" for safety
+ */
+app.post("/api/wordpress/publish", async (req, res) => {
+  const { siteUrl, username, appPassword, title, content, status, featuredImageUrl } = req.body || {};
+
+  if (!siteUrl || !username || !appPassword || !title || content === undefined) {
+    return res.status(400).json({ error: "Missing required fields: siteUrl, username, appPassword, title, content" });
+  }
+
+  const postStatus = status === "publish" ? "publish" : "draft";
+  const auth = Buffer.from(`${username}:${appPassword}`).toString("base64");
+  const apiUrl = `${siteUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+
+  const postBody = { title, content, status: postStatus };
+  if (featuredImageUrl) postBody.featured_media_url = featuredImageUrl;
+
+  try {
+    const wpRes = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify(postBody),
+    });
+
+    const data = await wpRes.json();
+    if (!wpRes.ok) {
+      console.error(`[wordpress/publish] WP API error ${wpRes.status}:`, data.message || data.code || "(no message)");
+      return res.status(wpRes.status).json({ error: data.message || data.code || "WordPress API error" });
+    }
+
+    return res.json({ id: data.id, link: data.link, status: data.status });
+  } catch (err) {
+    console.error("[wordpress/publish] Unexpected error:", err.message);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+/**
+ * GET /api/wordpress/posts?siteUrl=...&username=...&appPassword=...
+ * Returns list of recent posts.
+ */
+app.get("/api/wordpress/posts", async (req, res) => {
+  const { siteUrl, username, appPassword } = req.query;
+
+  if (!siteUrl || !username || !appPassword) {
+    return res.status(400).json({ error: "Missing query params: siteUrl, username, appPassword" });
+  }
+
+  const auth = Buffer.from(`${username}:${appPassword}`).toString("base64");
+  const apiUrl = `${siteUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts?per_page=20&_fields=id,title,status,link,modified,content`;
+
+  try {
+    const wpRes = await fetch(apiUrl, {
+      headers: { Authorization: `Basic ${auth}` },
+    });
+
+    const data = await wpRes.json();
+    if (!wpRes.ok) {
+      console.error(`[wordpress/posts] WP API error ${wpRes.status}:`, data.message || data.code || "(no message)");
+      return res.status(wpRes.status).json({ error: data.message || data.code || "WordPress API error" });
+    }
+
+    return res.json(data);
+  } catch (err) {
+    console.error("[wordpress/posts] Unexpected error:", err.message);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+/**
+ * PUT /api/wordpress/update
+ * body: { siteUrl, username, appPassword, postId, content?, title?, status? }
+ * WordPress REST API uses POST method for updates.
+ */
+app.put("/api/wordpress/update", async (req, res) => {
+  const { siteUrl, username, appPassword, postId, content, title, status } = req.body || {};
+
+  if (!siteUrl || !username || !appPassword || !postId) {
+    return res.status(400).json({ error: "Missing required fields: siteUrl, username, appPassword, postId" });
+  }
+
+  const auth = Buffer.from(`${username}:${appPassword}`).toString("base64");
+  const apiUrl = `${siteUrl.replace(/\/$/, "")}/wp-json/wp/v2/posts/${postId}`;
+
+  const updateBody = {};
+  if (title !== undefined) updateBody.title = title;
+  if (content !== undefined) updateBody.content = content;
+  if (status !== undefined) updateBody.status = status;
+
+  try {
+    const wpRes = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Basic ${auth}`,
+      },
+      body: JSON.stringify(updateBody),
+    });
+
+    const data = await wpRes.json();
+    if (!wpRes.ok) {
+      console.error(`[wordpress/update] WP API error ${wpRes.status}:`, data.message || data.code || "(no message)");
+      return res.status(wpRes.status).json({ error: data.message || data.code || "WordPress API error" });
+    }
+
+    return res.json({ id: data.id, link: data.link, status: data.status, title: data.title });
+  } catch (err) {
+    console.error("[wordpress/update] Unexpected error:", err.message);
+    return res.status(500).json({ error: err.message || "Server error" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 // Simple healthcheck for Render
 app.get("/healthz", (req, res) => res.send("ok"));
 

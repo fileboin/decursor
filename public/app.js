@@ -824,6 +824,20 @@ async function sendChat() {
     streamSpan.remove();
     const rendered = renderAssistantMessage(fullText || "(prazan odgovor)", lastMessageHadContext);
     assistantDiv.appendChild(rendered);
+
+    // Always show "Send to WordPress as draft" button under AI responses
+    if (fullText && fullText !== "(prazan odgovor)") {
+      const wpDraftBtn = document.createElement("button");
+      wpDraftBtn.className = "btn-wp-draft";
+      wpDraftBtn.textContent = "📝 Pošalji na WordPress kao draft";
+      const capturedText = fullText;
+      wpDraftBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openWpDraftModal(capturedText);
+      });
+      assistantDiv.appendChild(wpDraftBtn);
+    }
+
     chatLog.scrollTop = chatLog.scrollHeight;
 
     if (fullText) chatHistory.push({ role: "assistant", content: fullText });
@@ -1072,3 +1086,259 @@ termCmdInput.addEventListener("keydown", async (e) => {
 
 // Load file tree on startup
 loadFileTree();
+
+// ---------- WordPress integration ----------
+
+// In-memory credentials — NEVER stored in localStorage
+let wpCreds = { siteUrl: "", username: "", appPassword: "" };
+let wpCurrentPostId = null;
+
+const wpModal = document.getElementById("wordpress-modal");
+const wpStatus = document.getElementById("wp-status");
+
+document.getElementById("wordpress-btn").addEventListener("click", () => {
+  document.getElementById("wp-site-url").value = wpCreds.siteUrl;
+  document.getElementById("wp-username").value = wpCreds.username;
+  if (wpCreds.appPassword) {
+    document.getElementById("wp-app-password").value = wpCreds.appPassword;
+  }
+  wpModal.classList.add("open");
+  if (wpCreds.siteUrl && wpCreds.username && wpCreds.appPassword) {
+    loadWpPosts();
+  }
+});
+
+document.getElementById("wp-close-btn").addEventListener("click", () => {
+  wpModal.classList.remove("open");
+});
+
+document.getElementById("wp-save-creds-btn").addEventListener("click", () => {
+  wpCreds.siteUrl = document.getElementById("wp-site-url").value.trim();
+  wpCreds.username = document.getElementById("wp-username").value.trim();
+  wpCreds.appPassword = document.getElementById("wp-app-password").value.trim();
+  wpStatus.textContent = "Kredencijali sačuvani u memoriji sesije.";
+  setTimeout(() => { wpStatus.textContent = ""; }, 3000);
+  if (wpCreds.siteUrl && wpCreds.username && wpCreds.appPassword) {
+    loadWpPosts();
+  }
+});
+
+document.getElementById("wp-refresh-posts-btn").addEventListener("click", () => {
+  wpCreds.siteUrl = document.getElementById("wp-site-url").value.trim();
+  wpCreds.username = document.getElementById("wp-username").value.trim();
+  wpCreds.appPassword = document.getElementById("wp-app-password").value.trim();
+  loadWpPosts();
+});
+
+async function loadWpPosts() {
+  const postsEl = document.getElementById("wp-posts-list");
+  postsEl.innerHTML = '<p style="font-size:12px;opacity:0.4;padding:8px;margin:0;">Učitavam postove...</p>';
+
+  if (!wpCreds.siteUrl || !wpCreds.username || !wpCreds.appPassword) {
+    postsEl.innerHTML = '<p style="font-size:12px;opacity:0.4;padding:8px;margin:0;">Popunite Site URL, korisničko ime i Application Password.</p>';
+    return;
+  }
+
+  try {
+    const params = new URLSearchParams({
+      siteUrl: wpCreds.siteUrl,
+      username: wpCreds.username,
+      appPassword: wpCreds.appPassword,
+    });
+    const res = await apiFetch(`${BACKEND_BASE}/api/wordpress/posts?${params}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      postsEl.innerHTML = `<p style="font-size:12px;color:#f48771;padding:8px;margin:0;">Greška: ${data.error || "Nepoznata greška"}</p>`;
+      return;
+    }
+
+    if (!Array.isArray(data) || !data.length) {
+      postsEl.innerHTML = '<p style="font-size:12px;opacity:0.4;padding:8px;margin:0;">Nema postova.</p>';
+      return;
+    }
+
+    postsEl.innerHTML = "";
+    for (const post of data) {
+      const item = document.createElement("div");
+      item.className = "wp-post-item";
+      item.dataset.postId = post.id;
+
+      const titleSpan = document.createElement("span");
+      titleSpan.className = "wp-post-title";
+      titleSpan.textContent = (post.title && post.title.rendered)
+        ? post.title.rendered.replace(/<[^>]+>/g, "")
+        : `Post #${post.id}`;
+      item.appendChild(titleSpan);
+
+      const statusSpan = document.createElement("span");
+      statusSpan.className = "wp-post-status";
+      statusSpan.textContent = post.status || "";
+      item.appendChild(statusSpan);
+
+      item.addEventListener("click", () => {
+        // Deactivate previous selection
+        postsEl.querySelectorAll(".wp-post-item.active").forEach((el) => el.classList.remove("active"));
+        item.classList.add("active");
+
+        wpCurrentPostId = post.id;
+        const editSection = document.getElementById("wp-edit-section");
+        editSection.style.display = "block";
+
+        const editArea = document.getElementById("wp-edit-area");
+        const existingHtml = (post.content && post.content.rendered) ? post.content.rendered : "";
+        editArea.value = existingHtml;
+
+        document.getElementById("wp-edit-status").textContent = `Uredi post #${post.id}. Izmijeni sadržaj i klikni Ažuriraj.`;
+      });
+
+      postsEl.appendChild(item);
+    }
+  } catch (err) {
+    postsEl.innerHTML = `<p style="font-size:12px;color:#f48771;padding:8px;margin:0;">Greška konekcije: ${err.message}</p>`;
+  }
+}
+
+document.getElementById("wp-cancel-edit-btn").addEventListener("click", () => {
+  wpCurrentPostId = null;
+  document.getElementById("wp-edit-section").style.display = "none";
+  document.getElementById("wp-edit-area").value = "";
+  document.getElementById("wp-edit-status").textContent = "";
+  document.getElementById("wp-posts-list").querySelectorAll(".wp-post-item.active").forEach((el) => el.classList.remove("active"));
+});
+
+document.getElementById("wp-update-post-btn").addEventListener("click", async () => {
+  if (!wpCurrentPostId) return;
+  const editStatus = document.getElementById("wp-edit-status");
+  const content = document.getElementById("wp-edit-area").value.trim();
+
+  if (!content) {
+    editStatus.textContent = "Sadržaj ne može biti prazan.";
+    return;
+  }
+
+  editStatus.textContent = "Ažuriram...";
+  const btn = document.getElementById("wp-update-post-btn");
+  btn.disabled = true;
+
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/wordpress/update`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteUrl: wpCreds.siteUrl,
+        username: wpCreds.username,
+        appPassword: wpCreds.appPassword,
+        postId: wpCurrentPostId,
+        content,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      editStatus.textContent = `Greška: ${data.error || "Nepoznata greška"}`;
+      return;
+    }
+    editStatus.textContent = `Ažurirano! Post #${data.id} — ${data.link || ""}`;
+  } catch (err) {
+    editStatus.textContent = `Greška konekcije: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---------- WP draft modal ----------
+
+let wpDraftMarkdown = "";
+
+function mdToHtml(text) {
+  try {
+    if (typeof marked !== "undefined" && marked.parse) {
+      return marked.parse(text);
+    }
+  } catch (_) { /* fallback below */ }
+  // Simple fallback if marked.js didn't load
+  return text
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/\n/g, "<br>");
+}
+
+function openWpDraftModal(markdownContent) {
+  wpDraftMarkdown = markdownContent;
+
+  // Pre-fill title from first non-empty line, stripping markdown heading markers
+  const firstLine = markdownContent.split("\n").find((l) => l.trim()) || "";
+  const suggestedTitle = firstLine.replace(/^#+\s*/, "").trim().slice(0, 120);
+  document.getElementById("wp-draft-title-input").value = suggestedTitle;
+
+  document.getElementById("wp-html-preview").innerHTML = mdToHtml(markdownContent);
+
+  const linkEl = document.getElementById("wp-draft-link");
+  linkEl.style.display = "none";
+  linkEl.textContent = "";
+  linkEl.href = "#";
+
+  const saveBtn = document.getElementById("wp-draft-save-btn");
+  saveBtn.disabled = false;
+  saveBtn.textContent = "💾 Sačuvaj kao draft";
+
+  document.getElementById("wp-draft-modal").classList.add("open");
+}
+
+document.getElementById("wp-draft-close-btn").addEventListener("click", () => {
+  document.getElementById("wp-draft-modal").classList.remove("open");
+});
+
+document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
+  if (!wpCreds.siteUrl || !wpCreds.username || !wpCreds.appPassword) {
+    alert("Unesite WordPress kredencijale u WordPress panel (dugme WordPress u gornjoj traci).");
+    return;
+  }
+
+  const title = document.getElementById("wp-draft-title-input").value.trim();
+  if (!title) {
+    document.getElementById("wp-draft-title-input").focus();
+    return;
+  }
+
+  const htmlContent = mdToHtml(wpDraftMarkdown);
+
+  const saveBtn = document.getElementById("wp-draft-save-btn");
+  saveBtn.disabled = true;
+  saveBtn.textContent = "Šaljem...";
+
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/wordpress/publish`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteUrl: wpCreds.siteUrl,
+        username: wpCreds.username,
+        appPassword: wpCreds.appPassword,
+        title,
+        content: htmlContent,
+        status: "draft",
+      }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      saveBtn.disabled = false;
+      saveBtn.textContent = "💾 Sačuvaj kao draft";
+      alert(`Greška: ${data.error || "Nepoznata greška"}`);
+      return;
+    }
+
+    saveBtn.textContent = "✓ Sačuvano!";
+
+    const linkEl = document.getElementById("wp-draft-link");
+    if (data.link) {
+      linkEl.href = data.link;
+      linkEl.textContent = `↗ Otvori draft u WordPressu`;
+      linkEl.style.display = "inline";
+    }
+  } catch (err) {
+    saveBtn.disabled = false;
+    saveBtn.textContent = "💾 Sačuvaj kao draft";
+    alert(`Greška konekcije: ${err.message}`);
+  }
+});
