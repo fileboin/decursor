@@ -29,12 +29,14 @@ function apiFetch(url, options) {
 // ---------- Monaco setup ----------
 require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
 require(["vs/editor/editor.main"], function () {
+  const savedTheme = document.documentElement.getAttribute("data-theme") || "dark";
+  const savedFontSize = Math.max(12, Math.min(22, parseInt(localStorage.getItem("decursor-font-size")) || 14));
   editor = monaco.editor.create(document.getElementById("monaco-container"), {
     value: "// Dobrodošla u Decursor\n// Piši kod ovdje, pitaj AI desno.\n",
     language: "javascript",
-    theme: "vs-dark",
+    theme: savedTheme === "light" ? "vs" : "vs-dark",
     automaticLayout: true,
-    fontSize: 14,
+    fontSize: savedFontSize,
     minimap: { enabled: false },
   });
 
@@ -1331,6 +1333,52 @@ function openWpDraftModal(markdownContent) {
 
 document.getElementById("wp-draft-close-btn").addEventListener("click", () => {
   document.getElementById("wp-draft-modal").classList.remove("open");
+});
+
+// ---------- Theme toggle ----------
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  localStorage.setItem("decursor-theme", theme);
+  const btn = document.getElementById("theme-toggle-btn");
+  if (btn) btn.textContent = theme === "dark" ? "☀️" : "🌙";
+  if (editor) monaco.editor.setTheme(theme === "dark" ? "vs-dark" : "vs");
+  const metaColor = document.getElementById("meta-theme-color");
+  if (metaColor) metaColor.content = theme === "dark" ? "#1e1e1e" : "#f0f0f0";
+}
+
+document.getElementById("theme-toggle-btn").addEventListener("click", () => {
+  const current = document.documentElement.getAttribute("data-theme") || "dark";
+  applyTheme(current === "dark" ? "light" : "dark");
+});
+
+// Sync button icon with the theme that was already applied by the flash-prevention script
+(function initThemeBtn() {
+  const current = document.documentElement.getAttribute("data-theme") || "dark";
+  const btn = document.getElementById("theme-toggle-btn");
+  if (btn) btn.textContent = current === "dark" ? "☀️" : "🌙";
+})();
+
+// ---------- Font-size controls ----------
+
+const FONT_MIN = 12;
+const FONT_MAX = 22;
+
+function applyFontSize(size) {
+  size = Math.max(FONT_MIN, Math.min(FONT_MAX, size));
+  document.documentElement.style.setProperty("--base-font-size", size + "px");
+  localStorage.setItem("decursor-font-size", size);
+  if (editor) editor.updateOptions({ fontSize: size });
+}
+
+document.getElementById("font-decrease-btn").addEventListener("click", () => {
+  const current = parseInt(document.documentElement.style.getPropertyValue("--base-font-size")) || 13;
+  applyFontSize(current - 1);
+});
+
+document.getElementById("font-increase-btn").addEventListener("click", () => {
+  const current = parseInt(document.documentElement.style.getPropertyValue("--base-font-size")) || 13;
+  applyFontSize(current + 1);
 });
 
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {

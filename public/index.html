@@ -5,15 +5,122 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Decursor</title>
 <link rel="manifest" href="/manifest.json" />
-<meta name="theme-color" content="#1e1e1e" />
+<meta name="theme-color" content="#1e1e1e" id="meta-theme-color" />
+<script>
+  (function(){
+    var t=localStorage.getItem('decursor-theme')||'dark';
+    document.documentElement.setAttribute('data-theme',t);
+    var fs=parseInt(localStorage.getItem('decursor-font-size'));
+    if(fs>=12&&fs<=22)document.documentElement.style.setProperty('--base-font-size',fs+'px');
+    document.getElementById('meta-theme-color').content=t==='light'?'#f0f0f0':'#1e1e1e';
+  })();
+</script>
 <style>
-  :root {
-    --bg: #1e1e1e;
-    --panel: #252526;
-    --border: #3c3c3c;
-    --text: #d4d4d4;
-    --accent: #4d9eff;
-    --accent-hover: #6cb0ff;
+  :root, [data-theme="dark"] {
+    --bg:                  #1e1e1e;
+    --panel:               #252526;
+    --border:              #3c3c3c;
+    --text:                #d4d4d4;
+    --accent:              #4d9eff;
+    --accent-hover:        #6cb0ff;
+    --input-bg:            #2d2d30;
+    --btn-primary-text:    #111;
+    --secondary-hover:     #3e3e40;
+    --item-hover:          #2a2d2e;
+    --item-active:         #094771;
+    --item-active-text:    #fff;
+    --dir-color:           #e8c369;
+    --user-msg:            #9cdcfe;
+    --code-header-bg:      #2d2d30;
+    --code-body-bg:        #1e1e1e;
+    --code-body-fg:        #d4d4d4;
+    --diff-bg:             #141414;
+    --diff-added-bg:       #122112;
+    --diff-added-fg:       #4ec94e;
+    --diff-removed-bg:     #2a1212;
+    --diff-removed-fg:     #f48771;
+    --diff-ctx-fg:         #555;
+    --wp-list-bg:          #1a1a1a;
+    --exec-cmd-bg:         #0d0d0d;
+    --exec-cmd-fg:         #4ec94e;
+    --btn-green-bg:        #1a3a1a;
+    --btn-green-fg:        #4ec94e;
+    --btn-green-border:    #2d5a2d;
+    --btn-green-hover:     #2d5a2d;
+    --btn-green-hover-fg:  #fff;
+    --btn-blue-bg:         #1a1a3a;
+    --btn-blue-fg:         #9cdcfe;
+    --btn-blue-border:     #2d2d7a;
+    --btn-blue-hover:      #2d2d7a;
+    --btn-blue-hover-fg:   #fff;
+    --btn-cyan-bg:         #1a2d3a;
+    --btn-cyan-fg:         #4d9eff;
+    --btn-cyan-border:     #2d5a7a;
+    --btn-cyan-hover:      #2d5a7a;
+    --btn-cyan-hover-fg:   #fff;
+    --btn-purple-bg:       #1a1030;
+    --btn-purple-fg:       #c586c0;
+    --btn-purple-border:   #4d2d7a;
+    --btn-purple-hover:    #2d1a4a;
+    --btn-replace-bg:      #2d2d30;
+    --btn-replace-fg:      #d4d4d4;
+    --btn-replace-border:  #555;
+    --btn-replace-hover-bg: #3c3c3c;
+    --btn-replace-hover-fg: #fff;
+    --base-font-size:      13px;
+  }
+
+  [data-theme="light"] {
+    --bg:                  #f0f0f0;
+    --panel:               #ffffff;
+    --border:              #cccccc;
+    --text:                #1a1a1a;
+    --accent:              #0066cc;
+    --accent-hover:        #0052a3;
+    --input-bg:            #ebebeb;
+    --btn-primary-text:    #ffffff;
+    --secondary-hover:     #d8d8d8;
+    --item-hover:          #dce8f5;
+    --item-active:         #0063b1;
+    --item-active-text:    #ffffff;
+    --dir-color:           #8b6a00;
+    --user-msg:            #0044aa;
+    --code-header-bg:      #e8e8e8;
+    --code-body-bg:        #f8f8f8;
+    --code-body-fg:        #1a1a1a;
+    --diff-bg:             #f5f5f5;
+    --diff-added-bg:       #d6f0d6;
+    --diff-added-fg:       #1a7f1a;
+    --diff-removed-bg:     #f0d6d6;
+    --diff-removed-fg:     #c62828;
+    --diff-ctx-fg:         #aaaaaa;
+    --wp-list-bg:          #f0f0f0;
+    --exec-cmd-bg:         #f5f5f5;
+    --exec-cmd-fg:         #1a7f1a;
+    --btn-green-bg:        #d6f0d6;
+    --btn-green-fg:        #1a7f1a;
+    --btn-green-border:    #88cc88;
+    --btn-green-hover:     #88cc88;
+    --btn-green-hover-fg:  #fff;
+    --btn-blue-bg:         #ddeeff;
+    --btn-blue-fg:         #0044aa;
+    --btn-blue-border:     #aaccee;
+    --btn-blue-hover:      #aaccee;
+    --btn-blue-hover-fg:   #fff;
+    --btn-cyan-bg:         #ddeeff;
+    --btn-cyan-fg:         #0066cc;
+    --btn-cyan-border:     #88aadd;
+    --btn-cyan-hover:      #88aadd;
+    --btn-cyan-hover-fg:   #fff;
+    --btn-purple-bg:       #f0eaff;
+    --btn-purple-fg:       #7700aa;
+    --btn-purple-border:   #cc88ff;
+    --btn-purple-hover:    #e0d0ff;
+    --btn-replace-bg:      #e8e8e8;
+    --btn-replace-fg:      #333333;
+    --btn-replace-border:  #bbbbbb;
+    --btn-replace-hover-bg: #d8d8d8;
+    --btn-replace-hover-fg: #000000;
   }
   * { box-sizing: border-box; }
   body {
@@ -45,7 +152,7 @@
     white-space: nowrap;
   }
   select, input, button, textarea {
-    background: #2d2d30;
+    background: var(--input-bg);
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: 4px;
@@ -55,17 +162,30 @@
   button {
     cursor: pointer;
     background: var(--accent);
-    color: #111;
+    color: var(--btn-primary-text);
     font-weight: 600;
     border: none;
   }
   button:hover { background: var(--accent-hover); }
   button.secondary {
-    background: #2d2d30;
+    background: var(--input-bg);
     color: var(--text);
     border: 1px solid var(--border);
   }
-  button.secondary:hover { background: #3c3c3c; }
+  button.secondary:hover { background: var(--secondary-hover); }
+
+  /* ── Theme & font-size controls ── */
+  .icon-btn {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-size: 15px;
+    padding: 4px 8px;
+    min-height: unset;
+    line-height: 1.2;
+    font-weight: normal;
+  }
+  .icon-btn:hover { background: var(--secondary-hover); color: var(--text); }
 
   #layout {
     display: flex;
@@ -134,9 +254,9 @@
     text-overflow: ellipsis;
     line-height: 1.5;
   }
-  .tree-item:hover { background: #2a2d2e; }
-  .tree-item.active { background: #094771; color: #fff; }
-  .tree-dir  { color: #e8c369; }
+  .tree-item:hover { background: var(--item-hover); }
+  .tree-item.active { background: var(--item-active); color: var(--item-active-text); }
+  .tree-dir  { color: var(--dir-color); }
   .tree-file { color: var(--text); }
   .tree-arrow {
     font-size: 9px;
@@ -189,17 +309,17 @@
     min-height: 0;
     overflow-y: auto;
     padding: 10px;
-    font-size: 13px;
+    font-size: var(--base-font-size);
   }
   .msg {
     margin-bottom: 12px;
     word-break: break-word;
   }
   .msg.user {
-    color: #9cdcfe;
+    color: var(--user-msg);
     white-space: pre-wrap;
   }
-  .msg.assistant { color: #d4d4d4; }
+  .msg.assistant { color: var(--text); }
   .msg .role-label {
     font-size: 11px;
     text-transform: uppercase;
@@ -225,7 +345,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    background: #2d2d30;
+    background: var(--code-header-bg);
     padding: 3px 8px;
     border-bottom: 1px solid var(--border);
     gap: 6px;
@@ -245,44 +365,44 @@
     font-size: 10px;
     padding: 2px 8px;
     min-height: unset;
-    background: #1a3a1a;
-    color: #4ec94e;
-    border: 1px solid #2d5a2d;
+    background: var(--btn-green-bg);
+    color: var(--btn-green-fg);
+    border: 1px solid var(--btn-green-border);
     border-radius: 3px;
     cursor: pointer;
     white-space: nowrap;
     font-weight: 500;
   }
   .btn-code-action:hover {
-    background: #2d5a2d;
-    color: #9cdcfe;
+    background: var(--btn-green-hover);
+    color: var(--user-msg);
   }
   .btn-code-replace {
-    background: #2d2d30;
-    color: #d4d4d4;
-    border-color: #555;
+    background: var(--btn-replace-bg);
+    color: var(--btn-replace-fg);
+    border-color: var(--btn-replace-border);
   }
   .btn-code-replace:hover {
-    background: #3c3c3c;
-    color: #fff;
+    background: var(--btn-replace-hover-bg);
+    color: var(--btn-replace-hover-fg);
   }
   .btn-code-replace-highlight {
-    background: #1a2d3a;
-    color: #4d9eff;
-    border-color: #2d5a7a;
+    background: var(--btn-cyan-bg);
+    color: var(--btn-cyan-fg);
+    border-color: var(--btn-cyan-border);
   }
   .btn-code-replace-highlight:hover {
-    background: #2d5a7a;
-    color: #fff;
+    background: var(--btn-cyan-hover);
+    color: var(--btn-cyan-hover-fg);
   }
   .code-block-body {
     margin: 0;
     padding: 8px 10px;
-    background: #1e1e1e;
+    background: var(--code-body-bg);
     overflow-x: auto;
     white-space: pre;
-    font-size: 12px;
-    color: #d4d4d4;
+    font-size: var(--base-font-size);
+    color: var(--code-body-fg);
     line-height: 1.5;
     word-break: normal;
   }
@@ -307,14 +427,14 @@
 
   /* "Apply to file" button style */
   .btn-code-apply-file {
-    background: #1a1a3a;
-    color: #9cdcfe;
-    border: 1px solid #2d2d7a;
+    background: var(--btn-blue-bg);
+    color: var(--btn-blue-fg);
+    border: 1px solid var(--btn-blue-border);
     border-radius: 3px;
   }
   .btn-code-apply-file:hover {
-    background: #2d2d7a;
-    color: #fff;
+    background: var(--btn-blue-hover);
+    color: var(--btn-blue-hover-fg);
   }
 
   #chat-input-area {
@@ -437,7 +557,7 @@
     overflow-y: auto;
     padding: 6px 10px;
     font-family: "Consolas", "Courier New", monospace;
-    font-size: 12px;
+    font-size: var(--base-font-size);
     line-height: 1.55;
     background: #0d0d0d;
     white-space: pre-wrap;
@@ -475,12 +595,12 @@
   }
   /* "Run in terminal" button on bash/sh code blocks */
   .btn-run-terminal {
-    background: #1a1030;
-    color: #c586c0;
-    border: 1px solid #4d2d7a;
+    background: var(--btn-purple-bg);
+    color: var(--btn-purple-fg);
+    border: 1px solid var(--btn-purple-border);
     border-radius: 3px;
   }
-  .btn-run-terminal:hover { background: #2d1a4a; color: #fff; }
+  .btn-run-terminal:hover { background: var(--btn-purple-hover); color: var(--btn-purple-fg); }
 
   /* ── Diff preview modal ── */
   #diff-modal {
@@ -520,7 +640,7 @@
     font-family: "Consolas", "Courier New", monospace;
     font-size: 12px;
     line-height: 1.5;
-    background: #141414;
+    background: var(--diff-bg);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 4px 0;
@@ -532,9 +652,9 @@
     display: block;
     overflow-x: auto;
   }
-  .diff-line-added    { background: #122112; color: #4ec94e; }
-  .diff-line-removed  { background: #2a1212; color: #f48771; text-decoration: line-through; }
-  .diff-line-unchanged { color: #555; }
+  .diff-line-added    { background: var(--diff-added-bg); color: var(--diff-added-fg); }
+  .diff-line-removed  { background: var(--diff-removed-bg); color: var(--diff-removed-fg); text-decoration: line-through; }
+  .diff-line-unchanged { color: var(--diff-ctx-fg); }
   #diff-modal-actions {
     display: flex;
     justify-content: flex-end;
@@ -542,11 +662,11 @@
     flex-shrink: 0;
   }
   #diff-accept-btn {
-    background: #1a3a1a;
-    color: #4ec94e;
-    border: 1px solid #2d5a2d;
+    background: var(--btn-green-bg);
+    color: var(--btn-green-fg);
+    border: 1px solid var(--btn-green-border);
   }
-  #diff-accept-btn:hover { background: #2d5a2d; color: #fff; }
+  #diff-accept-btn:hover { background: var(--btn-green-hover); color: var(--btn-green-hover-fg); }
 
   /* ── Exec confirm modal ── */
   #exec-confirm-modal {
@@ -574,13 +694,13 @@
   #exec-confirm-content h2 { margin: 0; font-size: 15px; }
   #exec-confirm-content p  { margin: 0; font-size: 12px; opacity: 0.65; }
   #exec-confirm-cmd {
-    background: #0d0d0d;
+    background: var(--exec-cmd-bg);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 10px 12px;
     font-family: "Consolas", "Courier New", monospace;
     font-size: 12px;
-    color: #4ec94e;
+    color: var(--exec-cmd-fg);
     white-space: pre-wrap;
     word-break: break-all;
     margin: 0;
@@ -593,11 +713,11 @@
     gap: 8px;
   }
   #exec-accept-btn {
-    background: #1a1030;
-    color: #c586c0;
-    border: 1px solid #4d2d7a;
+    background: var(--btn-purple-bg);
+    color: var(--btn-purple-fg);
+    border: 1px solid var(--btn-purple-border);
   }
-  #exec-accept-btn:hover { background: #2d1a4a; color: #fff; }
+  #exec-accept-btn:hover { background: var(--btn-purple-hover); color: var(--btn-purple-fg); }
 
   /* ── Mobile responsive (≤ 768 px) ── */
   @media (max-width: 768px) {
@@ -644,6 +764,10 @@
     button {
       min-height: 44px;
       padding: 10px 14px;
+    }
+    .icon-btn {
+      min-height: 44px;
+      padding: 8px 12px;
     }
     select,
     input:not([type="checkbox"]) {
@@ -809,7 +933,7 @@
     overflow-y: auto;
     border: 1px solid var(--border);
     border-radius: 4px;
-    background: #1a1a1a;
+    background: var(--wp-list-bg);
   }
   .wp-post-item {
     padding: 6px 10px;
@@ -822,14 +946,14 @@
     gap: 8px;
   }
   .wp-post-item:last-child { border-bottom: none; }
-  .wp-post-item:hover { background: #2a2d2e; }
-  .wp-post-item.active { background: #094771; }
+  .wp-post-item:hover { background: var(--item-hover); }
+  .wp-post-item.active { background: var(--item-active); }
   .wp-post-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .wp-post-status {
     font-size: 10px;
     opacity: 0.6;
     flex-shrink: 0;
-    background: #2d2d30;
+    background: var(--input-bg);
     padding: 1px 5px;
     border-radius: 3px;
   }
@@ -852,9 +976,9 @@
   .btn-wp-draft {
     display: inline-block;
     margin-top: 8px;
-    background: #1a0d2e;
-    color: #c586c0;
-    border: 1px solid #4d2d7a;
+    background: var(--btn-purple-bg);
+    color: var(--btn-purple-fg);
+    border: 1px solid var(--btn-purple-border);
     border-radius: 3px;
     font-size: 11px;
     padding: 3px 10px;
@@ -862,7 +986,7 @@
     min-height: unset;
     font-weight: 500;
   }
-  .btn-wp-draft:hover { background: #2d1a4a; color: #fff; }
+  .btn-wp-draft:hover { background: var(--btn-purple-hover); color: var(--btn-purple-fg); }
 
   /* ── WP draft modal ── */
   #wp-draft-modal {
@@ -973,6 +1097,9 @@
 
   <button class="secondary" id="github-btn">GitHub</button>
   <button class="secondary" id="wordpress-btn">WordPress</button>
+  <button class="icon-btn" id="theme-toggle-btn" title="Prebaci temu (svetla/tamna)">☀️</button>
+  <button class="icon-btn" id="font-decrease-btn" title="Smanji font (A-)">A−</button>
+  <button class="icon-btn" id="font-increase-btn" title="Povećaj font (A+)">A+</button>
 </div>
 
 <div id="layout">
