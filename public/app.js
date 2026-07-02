@@ -271,10 +271,14 @@ async function saveFile() {
 const providerSelect = document.getElementById("provider-select");
 const modelSelect = document.getElementById("model-select");
 const modelFallbackInput = document.getElementById("model-input-fallback");
+const modelSearchInput = document.getElementById("model-search");
 
 // In-memory state for last chosen provider and model (not persisted to localStorage)
 let selectedProvider = providerSelect.value;
 let selectedModel = "";
+
+// Full unfiltered model list loaded from backend — never sliced
+let allModels = [];
 
 /** Return current model value from whichever control is visible. */
 function getSelectedModel() {
@@ -284,13 +288,42 @@ function getSelectedModel() {
   return modelSelect.value;
 }
 
+/**
+ * Rebuild the <select> options based on the current search term.
+ * Free models (:free in id) always appear first, then the rest sorted by name.
+ * No backend filtering — only controls what is visible in the dropdown.
+ */
+function renderModelOptions(query) {
+  const q = (query || "").toLowerCase();
+  const filtered = q
+    ? allModels.filter((m) => m.id.toLowerCase().includes(q) || m.name.toLowerCase().includes(q))
+    : allModels;
+
+  const prev = modelSelect.value;
+  modelSelect.innerHTML = filtered
+    .map((m) => `<option value="${m.id}">${m.name}</option>`)
+    .join("");
+
+  // Preserve previously selected model if it is still in the filtered list
+  if (prev && filtered.some((m) => m.id === prev)) {
+    modelSelect.value = prev;
+  }
+  selectedModel = modelSelect.value;
+}
+
 async function populateModels() {
   selectedProvider = providerSelect.value;
 
+  allModels = [];
   modelSelect.innerHTML = '<option value="">Učitavam modele...</option>';
   modelSelect.disabled = true;
   modelSelect.style.display = "";
   modelFallbackInput.style.display = "none";
+
+  if (modelSearchInput) {
+    modelSearchInput.value = "";
+    modelSearchInput.style.display = selectedProvider === "openrouter" ? "" : "none";
+  }
 
   const ollamaUrl = localStorage.getItem("decursor_ollama_url") || "";
   const params = new URLSearchParams({ provider: selectedProvider });
@@ -305,18 +338,30 @@ async function populateModels() {
     const models = await res.json();
     if (!Array.isArray(models) || models.length === 0) throw new Error("Nema dostupnih modela");
 
-    modelSelect.innerHTML = models
-      .map((m) => `<option value="${m.id}">${m.name}</option>`)
-      .join("");
+    // Sort: free models first, then alphabetically by name — no filtering
+    allModels = models.slice().sort((a, b) => {
+      const aFree = a.id.includes(":free");
+      const bFree = b.id.includes(":free");
+      if (aFree !== bFree) return aFree ? -1 : 1;
+      return (a.name || a.id).localeCompare(b.name || b.id);
+    });
+
+    renderModelOptions("");
     modelSelect.disabled = false;
-    selectedModel = modelSelect.value;
   } catch (err) {
     console.warn("[populateModels] Failed, showing fallback input:", err.message);
     modelSelect.style.display = "none";
+    if (modelSearchInput) modelSearchInput.style.display = "none";
     modelFallbackInput.style.display = "";
     modelFallbackInput.placeholder = "ID modela (lista nedostupna)";
     selectedModel = modelFallbackInput.value.trim();
   }
+}
+
+if (modelSearchInput) {
+  modelSearchInput.addEventListener("input", () => {
+    renderModelOptions(modelSearchInput.value);
+  });
 }
 
 modelFallbackInput.addEventListener("input", () => {
