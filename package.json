@@ -1,19 +1,2 @@
-{
-  "name": "decursor",
-  "version": "0.1.0",
-  "description": "Mobile-friendly browser code editor with AI assistance (OpenRouter + Ollama)",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
-    "express": "^4.19.2",
-    "express-rate-limit": "^8.5.2",
-    "node-fetch": "^2.7.0"
-  },
-  "engines": {
-    "node": ">=18"
-  }
-}
+// Dobrodošla u Decursor
+// Piši kod ovdje, pitaj AI desno.
