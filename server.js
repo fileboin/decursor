@@ -437,6 +437,61 @@ app.post("/api/github/push", async (req, res) => {
   }
 });
 
+// ─── GET /api/models ──────────────────────────────────────────────────────────
+/**
+ * GET /api/models?provider=openrouter|ollama[&ollamaUrl=...]
+ * Returns [{id, name}] for the requested provider.
+ * OpenRouter endpoint is public (no auth header needed).
+ * Ollama uses the configured OLLAMA_URL or the ollamaUrl query param.
+ */
+app.get("/api/models", async (req, res) => {
+  const { provider, ollamaUrl: queryOllamaUrl } = req.query;
+
+  if (!provider) {
+    return res.status(400).json({ error: "Missing query param: provider" });
+  }
+
+  if (provider === "openrouter") {
+    try {
+      const response = await fetch("https://openrouter.ai/api/v1/models");
+      if (!response.ok) {
+        return res.status(response.status).json({ error: "Failed to fetch OpenRouter models" });
+      }
+      const data = await response.json();
+      const models = (data.data || [])
+        .slice(0, 30)
+        .map((m) => ({ id: m.id, name: m.name || m.id }));
+      return res.json(models);
+    } catch (err) {
+      console.error("[models/openrouter] error:", err);
+      return res.status(500).json({ error: err.message || "Failed to fetch OpenRouter models" });
+    }
+  }
+
+  if (provider === "ollama") {
+    const base = (queryOllamaUrl || DEFAULT_OLLAMA_URL || "").replace(/\/$/, "");
+    if (!base) {
+      return res.status(400).json({
+        error: "No Ollama URL configured. Set OLLAMA_URL env var or provide ollamaUrl query param.",
+      });
+    }
+    try {
+      const response = await fetch(`${base}/api/tags`);
+      if (!response.ok) {
+        return res.status(response.status).json({ error: "Failed to fetch Ollama models" });
+      }
+      const data = await response.json();
+      const models = (data.models || []).map((m) => ({ id: m.name, name: m.name }));
+      return res.json(models);
+    } catch (err) {
+      console.error("[models/ollama] error:", err);
+      return res.status(500).json({ error: err.message || "Failed to fetch Ollama models" });
+    }
+  }
+
+  return res.status(400).json({ error: `Unknown provider: ${provider}` });
+});
+
 // Simple healthcheck for Render
 app.get("/healthz", (req, res) => res.send("ok"));
 

@@ -518,8 +518,16 @@
   </select>
 
   <select id="model-select">
-    <!-- populated by app.js -->
+    <!-- populated by app.js via /api/models -->
   </select>
+
+  <input
+    id="model-input-fallback"
+    type="text"
+    placeholder="ID modela..."
+    style="display:none"
+    title="Unesite ID modela ručno (lista modela nije dostupna)"
+  />
 
   <button class="secondary" id="github-btn">GitHub</button>
 </div>
