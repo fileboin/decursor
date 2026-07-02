@@ -15,6 +15,227 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 // but a server-side default can also be set via env var.
 const DEFAULT_OLLAMA_URL = process.env.OLLAMA_URL || "";
 
+// ─── NEW: rate limiter, path helpers, workspace ───────────────────────────────
+const rateLimit = require("express-rate-limit");
+const path = require("path");
+const fs = require("fs");
+
+const WORKSPACE_ROOT = path.resolve(__dirname, "workspace");
+if (!fs.existsSync(WORKSPACE_ROOT)) {
+  fs.mkdirSync(WORKSPACE_ROOT, { recursive: true });
+}
+
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again after a minute." },
+});
+
+app.use("/api/", apiLimiter);
+
+// ─── NEW: POST /api/chat/stream ───────────────────────────────────────────────
+/**
+ * POST /api/chat/stream
+ * Same body as /api/chat; streams the response via Server-Sent Events.
+ * body: { provider, model, messages, ollamaUrl? }
+ */
+app.post("/api/chat/stream", async (req, res) => {
+  const { provider, model, messages, ollamaUrl } = req.body || {};
+
+  if (!provider || !model || !Array.isArray(messages)) {
+    return res.status(400).json({ error: "Missing provider, model, or messages" });
+  }
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  const send = (data) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+
+  try {
+    if (provider === "openrouter") {
+      if (!OPENROUTER_API_KEY) {
+        send({ error: "Server missing OPENROUTER_API_KEY env var" });
+        return res.end();
+      }
+
+      const response = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+          "HTTP-Referer": process.env.PUBLIC_URL || "https://decursor.onrender.com",
+          "X-Title": "Decursor",
+        },
+        body: JSON.stringify({ model, messages, stream: true }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        send({ error: errData.error?.message || "OpenRouter error" });
+        return res.end();
+      }
+
+      for await (const chunk of response.body) {
+        const lines = chunk.toString("utf8").split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith("data:")) continue;
+          const raw = trimmed.slice(5).trim();
+          if (raw === "[DONE]") {
+            res.write("data: [DONE]\n\n");
+            continue;
+          }
+          try {
+            const parsed = JSON.parse(raw);
+            const delta = parsed.choices?.[0]?.delta?.content;
+            if (delta != null) send({ delta });
+          } catch (_) { /* skip malformed SSE lines */ }
+        }
+      }
+
+      return res.end();
+    }
+
+    if (provider === "ollama") {
+      const base = (ollamaUrl || DEFAULT_OLLAMA_URL || "").replace(/\/$/, "");
+      if (!base) {
+        send({ error: "No Ollama URL configured. Set OLLAMA_URL env var or provide ollamaUrl in the request." });
+        return res.end();
+      }
+
+      const response = await fetch(`${base}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model, messages, stream: true }),
+      });
+
+      if (!response.ok) {
+        const errData = await response.json();
+        send({ error: errData.error || "Ollama error" });
+        return res.end();
+      }
+
+      for await (const chunk of response.body) {
+        const lines = chunk.toString("utf8").split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const parsed = JSON.parse(trimmed);
+            const delta = parsed.message?.content;
+            if (delta != null) send({ delta });
+            if (parsed.done) res.write("data: [DONE]\n\n");
+          } catch (_) { /* skip malformed lines */ }
+        }
+      }
+
+      return res.end();
+    }
+
+    send({ error: `Unknown provider: ${provider}` });
+    return res.end();
+  } catch (err) {
+    console.error("[chat/stream] Unexpected error:", err);
+    send({ error: err.message || "Server error" });
+    return res.end();
+  }
+});
+
+// ─── NEW: File system API ─────────────────────────────────────────────────────
+
+function safeResolvePath(requestedPath) {
+  const resolved = path.resolve(WORKSPACE_ROOT, requestedPath.replace(/^\/+/, ""));
+  const prefix = WORKSPACE_ROOT + path.sep;
+  if (!resolved.startsWith(prefix) && resolved !== WORKSPACE_ROOT) return null;
+  return resolved;
+}
+
+function buildFileTree(dirPath, rootPath) {
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+  const result = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dirPath, entry.name);
+    const relPath = path.relative(rootPath, fullPath);
+    if (entry.isDirectory()) {
+      result.push({ path: relPath, type: "dir" });
+      result.push(...buildFileTree(fullPath, rootPath));
+    } else {
+      result.push({ path: relPath, type: "file" });
+    }
+  }
+  return result;
+}
+
+/**
+ * GET /api/files
+ * Returns a recursive file tree of ./workspace as JSON:
+ * [{path: string, type: "file"|"dir"}]
+ */
+app.get("/api/files", (req, res) => {
+  try {
+    const tree = buildFileTree(WORKSPACE_ROOT, WORKSPACE_ROOT);
+    return res.json(tree);
+  } catch (err) {
+    console.error("[files] list error:", err);
+    return res.status(500).json({ error: err.message || "Failed to list files" });
+  }
+});
+
+/**
+ * GET /api/files/read?path=...
+ * Returns the text content of a file inside ./workspace.
+ */
+app.get("/api/files/read", (req, res) => {
+  const requestedPath = req.query.path;
+  if (!requestedPath) {
+    return res.status(400).json({ error: "Missing query param: path" });
+  }
+  const resolved = safeResolvePath(requestedPath);
+  if (!resolved) {
+    return res.status(403).json({ error: "Path traversal detected" });
+  }
+  if (!fs.existsSync(resolved)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  try {
+    const content = fs.readFileSync(resolved, "utf8");
+    return res.type("text/plain").send(content);
+  } catch (err) {
+    console.error("[files/read] error:", err);
+    return res.status(500).json({ error: err.message || "Failed to read file" });
+  }
+});
+
+/**
+ * POST /api/files/write
+ * body: { path, content }
+ * Writes (creates or overwrites) a file inside ./workspace.
+ */
+app.post("/api/files/write", (req, res) => {
+  const { path: requestedPath, content } = req.body || {};
+  if (!requestedPath || content === undefined) {
+    return res.status(400).json({ error: "Missing body fields: path, content" });
+  }
+  const resolved = safeResolvePath(requestedPath);
+  if (!resolved) {
+    return res.status(403).json({ error: "Path traversal detected" });
+  }
+  try {
+    fs.mkdirSync(path.dirname(resolved), { recursive: true });
+    fs.writeFileSync(resolved, content, "utf8");
+    return res.json({ ok: true, path: requestedPath });
+  } catch (err) {
+    console.error("[files/write] error:", err);
+    return res.status(500).json({ error: err.message || "Failed to write file" });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * POST /api/chat
  * body: {
