@@ -315,6 +315,95 @@
     font-size: 14px;
   }
 
+  /* ── Monacopilot toggle row in Home dropdown ── */
+  .dd-monacopilot-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .dd-item-label {
+    font-size: 13px;
+    color: var(--text);
+    flex: 1;
+    line-height: 1.3;
+  }
+  .dd-toggle-switch {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .dd-toggle-switch input[type="checkbox"] {
+    opacity: 0;
+    width: 0;
+    height: 0;
+    position: absolute;
+    pointer-events: none;
+  }
+  .dd-toggle-track {
+    display: inline-block;
+    width: 38px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 10px;
+    position: relative;
+    transition: background 0.18s;
+  }
+  .dd-toggle-track::after {
+    content: '';
+    position: absolute;
+    left: 3px;
+    top: 3px;
+    width: 14px;
+    height: 14px;
+    background: #8a8a8a;
+    border-radius: 50%;
+    transition: transform 0.18s, background 0.18s;
+  }
+  .dd-toggle-switch input:checked + .dd-toggle-track {
+    background: #2a6e2a;
+  }
+  .dd-toggle-switch input:checked + .dd-toggle-track::after {
+    transform: translateX(18px);
+    background: #4ec94e;
+  }
+
+  /* ── MCP modal (placeholder) ── */
+  #mcp-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+  #mcp-modal.open { display: flex; }
+  #mcp-modal-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px 28px 24px;
+    max-width: 380px;
+    width: 100%;
+    text-align: center;
+  }
+  #mcp-modal-content h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: var(--accent);
+  }
+  #mcp-modal-content p {
+    margin: 0 0 24px;
+    color: var(--text);
+    opacity: 0.85;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+
   #layout {
     display: flex;
     flex: 1;
@@ -1205,8 +1294,18 @@
 
   <!-- Home menu -->
   <div id="home-menu-wrapper">
-    <button id="home-btn" class="icon-btn" title="Meni">☰</button>
+    <button id="home-btn" class="icon-btn" title="Početna">🏠</button>
     <div id="home-dropdown" class="hidden">
+      <!-- Monacopilot AI inline completion toggle -->
+      <div class="dd-section">
+        <div class="dd-monacopilot-row">
+          <span class="dd-item-label">🤖 Monacopilot</span>
+          <label class="dd-toggle-switch" title="Uključi/isključi AI inline dopunu koda">
+            <input type="checkbox" id="monacopilot-toggle" />
+            <span class="dd-toggle-track"></span>
+          </label>
+        </div>
+      </div>
       <div class="dd-section">
         <div class="dd-label">Tema</div>
         <div class="dd-row">
@@ -1224,6 +1323,10 @@
       <div class="dd-section">
         <button id="pay-to-use-btn" class="dd-btn dd-full">💰 Pay to Use</button>
       </div>
+      <div class="dd-section">
+        <button id="mcp-btn" class="dd-btn dd-full">🔌 MCP</button>
+      </div>
+      <!-- TODO: dodati nove stavke menija ovde -->
     </div>
   </div>
 
@@ -1445,6 +1548,15 @@
     <h2>💰 Pay to Use</h2>
     <p>Uskoro dostupno — platform za plaćanje po korišćenju</p>
     <button id="pay-modal-close-btn">Zatvori</button>
+  </div>
+</div>
+
+<!-- MCP modal (placeholder) -->
+<div id="mcp-modal">
+  <div id="mcp-modal-content">
+    <h2>🔌 MCP</h2>
+    <p>Uskoro dostupno — integracija sa Model Context Protocol serverima</p>
+    <button id="mcp-modal-close-btn">Zatvori</button>
   </div>
 </div>
 

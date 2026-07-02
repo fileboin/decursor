@@ -1473,6 +1473,57 @@ document.getElementById("pay-modal").addEventListener("click", (e) => {
   if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
 });
 
+// ---------- Monacopilot / AI inline completion ----------
+
+let monacopilotDisposable = null; // holds the registered Monaco inline completion provider
+
+/**
+ * Enable or disable inline AI completion (Monacopilot).
+ * Persists state to localStorage; registers or disposes the Monaco provider.
+ * @param {boolean} enabled
+ */
+function toggleAICompletion(enabled) {
+  localStorage.setItem("decursor-monacopilot", enabled ? "1" : "0");
+
+  if (enabled) {
+    // Placeholder: register Monaco inline completion provider here.
+    // Example: monacopilotDisposable = monaco.languages.registerInlineCompletionsProvider('*', provider);
+    console.info("[Monacopilot] AI inline completion ENABLED");
+  } else {
+    if (monacopilotDisposable) {
+      monacopilotDisposable.dispose();
+      monacopilotDisposable = null;
+    }
+    console.info("[Monacopilot] AI inline completion DISABLED");
+  }
+}
+
+// Sync toggle checkbox with saved state on load
+(function initMonacopilotToggle() {
+  const enabled = localStorage.getItem("decursor-monacopilot") !== "0";
+  const toggle = document.getElementById("monacopilot-toggle");
+  if (!toggle) return;
+  toggle.checked = enabled;
+  toggle.addEventListener("change", () => {
+    toggleAICompletion(toggle.checked);
+  });
+})();
+
+// ---------- MCP modal (placeholder) ----------
+
+document.getElementById("mcp-btn").addEventListener("click", () => {
+  homeDropdown.classList.add("hidden");
+  document.getElementById("mcp-modal").classList.add("open");
+});
+
+document.getElementById("mcp-modal-close-btn").addEventListener("click", () => {
+  document.getElementById("mcp-modal").classList.remove("open");
+});
+
+document.getElementById("mcp-modal").addEventListener("click", (e) => {
+  if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
+});
+
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
   if (!wpCreds.siteUrl || !wpCreds.username || !wpCreds.appPassword) {
     alert("Unesite WordPress kredencijale u WordPress panel (dugme WordPress u gornjoj traci).");
