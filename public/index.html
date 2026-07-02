@@ -385,6 +385,101 @@
     flex-wrap: wrap;
   }
 
+  /* ── Terminal panel ── */
+  #terminal-pane {
+    display: none;
+    flex-direction: column;
+    height: 220px;
+    min-height: 120px;
+    max-height: 50vh;
+    border-top: 2px solid var(--border);
+    background: #0d0d0d;
+    flex-shrink: 0;
+  }
+  #terminal-pane.open { display: flex; }
+  #terminal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 3px 8px;
+    background: #1a1a1a;
+    border-bottom: 1px solid #2a2a2a;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  #terminal-header .term-title { opacity: 0.75; }
+  #terminal-header .term-header-btns {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  #terminal-header .term-btn {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    opacity: 0.5;
+    padding: 1px 6px;
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1;
+    min-height: unset;
+    border-radius: 3px;
+  }
+  #terminal-header .term-btn:hover { opacity: 1; background: #2a2a2a; }
+  #terminal-output {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 10px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    background: #0d0d0d;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .term-stdout { color: #d4d4d4; }
+  .term-stderr { color: #f48771; }
+  .term-info   { color: #569cd6; }
+  .term-prompt { color: #4ec94e; font-weight: bold; }
+  #terminal-input-row {
+    display: flex;
+    align-items: center;
+    border-top: 1px solid #1e1e1e;
+    background: #111;
+    flex-shrink: 0;
+  }
+  #terminal-input-row .term-prompt-symbol {
+    padding: 0 6px 0 10px;
+    color: #4ec94e;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 13px;
+    user-select: none;
+    flex-shrink: 0;
+  }
+  #terminal-cmd-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    color: #d4d4d4;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    padding: 7px 10px 7px 0;
+    outline: none;
+  }
+  /* "Run in terminal" button on bash/sh code blocks */
+  .btn-run-terminal {
+    background: #1a1030;
+    color: #c586c0;
+    border: 1px solid #4d2d7a;
+    border-radius: 3px;
+  }
+  .btn-run-terminal:hover { background: #2d1a4a; color: #fff; }
+
   /* ── Mobile responsive (≤ 768 px) ── */
   @media (max-width: 768px) {
     #layout {
@@ -549,8 +644,31 @@
       <button class="secondary" id="new-file-btn">Novi fajl</button>
       <button id="save-btn">Sačuvaj</button>
       <span id="editor-status" style="font-size:11px; opacity:0.6; margin-left:auto;"></span>
+      <button class="secondary" id="terminal-toggle-btn" title="Otvori/zatvori terminal panel">⌨ Terminal</button>
     </div>
     <div id="monaco-container"></div>
+
+    <!-- Terminal panel – lives inside #editor-pane, below Monaco -->
+    <div id="terminal-pane">
+      <div id="terminal-header">
+        <span class="term-title">Terminal — workspace</span>
+        <div class="term-header-btns">
+          <button class="term-btn" id="terminal-clear-btn" title="Obriši output">⊘ clear</button>
+          <button class="term-btn" id="terminal-close-btn" title="Zatvori">✕</button>
+        </div>
+      </div>
+      <div id="terminal-output"></div>
+      <div id="terminal-input-row">
+        <span class="term-prompt-symbol">$</span>
+        <input
+          type="text"
+          id="terminal-cmd-input"
+          placeholder="unesite komandu..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </div>
+    </div>
   </div>
 
   <div id="chat-pane">

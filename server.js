@@ -19,6 +19,7 @@ const DEFAULT_OLLAMA_URL = process.env.OLLAMA_URL || "";
 const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs");
+const { exec: childExec } = require("child_process");
 
 const WORKSPACE_ROOT = path.resolve(__dirname, "workspace");
 if (!fs.existsSync(WORKSPACE_ROOT)) {
@@ -435,6 +436,60 @@ app.post("/api/github/push", async (req, res) => {
     console.error("[github/push] Unexpected error:", err);
     return res.status(500).json({ error: err.message || "Server error" });
   }
+});
+
+// ─── POST /api/exec ──────────────────────────────────────────────────────────
+//
+// WARNING: This endpoint executes arbitrary shell commands on the server.
+// It is intentionally powerful and is protected by the DECURSOR_ACCESS_KEY
+// auth middleware applied to all /api/ routes.
+// NEVER expose this endpoint without authentication – remove or gate it
+// behind a strong secret if deploying in any shared or public environment.
+//
+const EXEC_MAX_OUTPUT_BYTES = 100 * 1024; // 100 KB per stream
+const EXEC_TIMEOUT_MS = 30_000;           // 30 seconds
+
+/**
+ * POST /api/exec
+ * body: { command: string }
+ * Returns: { stdout, stderr, exitCode }
+ */
+app.post("/api/exec", (req, res) => {
+  const { command } = req.body || {};
+  if (!command || typeof command !== "string") {
+    return res.status(400).json({ error: "Missing body field: command (string)" });
+  }
+
+  const truncate = (str) => {
+    if (Buffer.byteLength(str, "utf8") > EXEC_MAX_OUTPUT_BYTES) {
+      return Buffer.from(str, "utf8").slice(0, EXEC_MAX_OUTPUT_BYTES).toString("utf8") + "\n...output truncated";
+    }
+    return str;
+  };
+
+  childExec(
+    command,
+    {
+      cwd: WORKSPACE_ROOT,
+      timeout: EXEC_TIMEOUT_MS,
+      // Allow a bit more than our limit so we can detect overflow and truncate ourselves
+      maxBuffer: EXEC_MAX_OUTPUT_BYTES + 4096,
+    },
+    (err, stdout, stderr) => {
+      let exitCode = 0;
+      if (err) {
+        exitCode = typeof err.code === "number" ? err.code : 1;
+        if (err.killed || err.signal) {
+          stderr = (stderr || "") + `\n[Process killed: timeout or signal ${err.signal || "unknown"}]`;
+        }
+      }
+      return res.json({
+        stdout: truncate(stdout || ""),
+        stderr: truncate(stderr || ""),
+        exitCode,
+      });
+    }
+  );
 });
 
 // ─── GET /api/models ──────────────────────────────────────────────────────────
