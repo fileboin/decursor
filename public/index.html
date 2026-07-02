@@ -284,6 +284,37 @@
     line-height: 1.5;
     word-break: normal;
   }
+  /* Multi-file selection checkbox in file tree */
+  .file-checkbox {
+    width: 13px;
+    height: 13px;
+    flex-shrink: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+    margin: 0;
+  }
+
+  /* Counter bar above chat input */
+  #selected-files-info {
+    display: none;
+    font-size: 11px;
+    color: var(--accent);
+    padding: 2px 0;
+    opacity: 0.85;
+  }
+
+  /* "Apply to file" button style */
+  .btn-code-apply-file {
+    background: #1a1a3a;
+    color: #9cdcfe;
+    border: 1px solid #2d2d7a;
+    border-radius: 3px;
+  }
+  .btn-code-apply-file:hover {
+    background: #2d2d7a;
+    color: #fff;
+  }
+
   #chat-input-area {
     display: flex;
     flex-direction: column;
@@ -517,6 +548,7 @@
   <div id="chat-pane">
     <div id="chat-log"></div>
     <div id="chat-input-area">
+      <div id="selected-files-info"></div>
       <textarea id="chat-input" placeholder="Pitaj AI nešto o kodu..."></textarea>
       <div id="chat-controls">
         <label class="toggle">
