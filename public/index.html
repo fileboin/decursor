@@ -4,6 +4,8 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Decursor</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#1e1e1e" />
 <style>
   :root {
     --bg: #1e1e1e;
@@ -887,5 +889,14 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
 <script src="app.js"></script>
+<script>
+  if ('serviceWorker' in navigator) {
+    try {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' });
+    } catch (err) {
+      console.warn('Service worker registration failed:', err);
+    }
+  }
+</script>
 </body>
 </html>
