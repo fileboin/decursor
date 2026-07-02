@@ -72,8 +72,92 @@
     flex-direction: row;
   }
 
+  /* ── File tree panel ── */
+  #file-tree-pane {
+    width: 220px;
+    min-width: 160px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+  #file-tree-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    opacity: 0.85;
+    flex-shrink: 0;
+  }
+  #file-tree-header .refresh-btn {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    opacity: 0.55;
+    padding: 2px 5px;
+    font-size: 13px;
+    min-height: unset;
+    cursor: pointer;
+    line-height: 1;
+  }
+  #file-tree-header .refresh-btn:hover { opacity: 1; background: transparent; }
+  #file-tree {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+  #file-tree ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .tree-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 12.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.5;
+  }
+  .tree-item:hover { background: #2a2d2e; }
+  .tree-item.active { background: #094771; color: #fff; }
+  .tree-dir  { color: #e8c369; }
+  .tree-file { color: var(--text); }
+  .tree-arrow {
+    font-size: 9px;
+    display: inline-block;
+    width: 10px;
+    flex-shrink: 0;
+    transition: transform 0.12s;
+    opacity: 0.7;
+  }
+  .tree-arrow.open { transform: rotate(90deg); }
+  .tree-children { display: none; }
+  .tree-children.open { display: block; }
+  .tree-empty {
+    font-size: 12px;
+    color: var(--text);
+    opacity: 0.4;
+    padding: 14px 10px;
+    text-align: center;
+  }
+
   #editor-pane {
-    width: 60%;
+    flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border);
@@ -93,7 +177,8 @@
   }
 
   #chat-pane {
-    width: 40%;
+    width: 340px;
+    flex-shrink: 0;
     display: flex;
     flex-direction: column;
   }
@@ -275,28 +360,30 @@
       flex-direction: column;
     }
 
-    /*
-     * Editor grows to fill whatever space the chat-pane doesn't need.
-     * This eliminates the empty black gap: when chat-log is empty the
-     * editor expands to nearly full height; it shrinks as messages appear.
-     */
-    #editor-pane {
+    #file-tree-pane {
       width: 100%;
-      flex: 1 1 0;        /* grow to fill available space, can shrink */
-      min-height: 30vh;
-      min-height: 30dvh;  /* always keep at least 30 % of the viewport */
+      min-width: unset;
+      max-height: 28vh;
+      max-height: 28dvh;
       border-right: none;
       border-bottom: 1px solid var(--border);
     }
 
     /*
-     * Chat-pane wraps to content height instead of claiming all remaining
-     * space. Together with the chat-log override below this removes the
-     * forced empty area.
+     * Editor grows to fill whatever space the chat-pane doesn't need.
      */
+    #editor-pane {
+      width: 100%;
+      flex: 1 1 0;
+      min-height: 30vh;
+      min-height: 30dvh;
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+
     #chat-pane {
       width: 100%;
-      flex: 0 0 auto;     /* take only what the content needs */
+      flex: 0 0 auto;
       min-height: 0;
     }
 
@@ -407,10 +494,21 @@
 </div>
 
 <div id="layout">
+  <!-- Left: file tree -->
+  <div id="file-tree-pane">
+    <div id="file-tree-header">
+      <span>Fajlovi</span>
+      <button class="refresh-btn" id="refresh-tree-btn" title="Osvježi stablo">↺</button>
+    </div>
+    <div id="file-tree"><p class="tree-empty">Učitavam...</p></div>
+  </div>
+
+  <!-- Center: Monaco editor -->
   <div id="editor-pane">
     <div id="editor-toolbar">
       <input id="filename-input" placeholder="filename.js" value="untitled.js" style="width:140px" />
       <button class="secondary" id="new-file-btn">Novi fajl</button>
+      <button id="save-btn">Sačuvaj</button>
       <span id="editor-status" style="font-size:11px; opacity:0.6; margin-left:auto;"></span>
     </div>
     <div id="monaco-container"></div>

@@ -160,6 +160,7 @@ const OLLAMA_MODELS = [
 let editor;
 let chatHistory = []; // {role, content}
 let lastMessageHadContext = false; // tracks whether last user msg included editor code
+let currentOpenFilePath = null; // workspace-relative path of the currently open file
 
 // ---------- Monaco setup ----------
 require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
@@ -183,9 +184,193 @@ function updateLanguageFromFilename() {
     js: "javascript", ts: "typescript", py: "python", html: "html",
     css: "css", json: "json", md: "markdown", java: "java",
     rb: "ruby", go: "go", php: "php", sh: "shell", yml: "yaml", yaml: "yaml",
+    c: "c", cpp: "cpp", cs: "csharp", rs: "rust", swift: "swift", kt: "kotlin",
   };
   const lang = langMap[ext] || "plaintext";
   if (editor) monaco.editor.setModelLanguage(editor.getModel(), lang);
+}
+
+// ---------- File tree ----------
+
+/** Convert the flat [{path, type}] array from /api/files into a nested tree. */
+function flatToTree(entries) {
+  const root = { children: {} };
+  for (const entry of entries) {
+    const parts = entry.path.replace(/\\/g, "/").split("/");
+    let node = root;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (!node.children[part]) {
+        node.children[part] = {
+          name: part,
+          path: parts.slice(0, i + 1).join("/"),
+          type: i === parts.length - 1 ? entry.type : "dir",
+          children: {},
+        };
+      }
+      node = node.children[part];
+    }
+  }
+  return root.children;
+}
+
+/** Recursively build a <ul> DOM element for the given children map. */
+function renderTreeNodes(childrenMap, depth) {
+  const ul = document.createElement("ul");
+
+  // Sort: dirs first, then files, both alphabetically
+  const nodes = Object.values(childrenMap).sort((a, b) => {
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.name.localeCompare(b.name);
+  });
+
+  for (const node of nodes) {
+    const li = document.createElement("li");
+
+    const item = document.createElement("div");
+    item.className = `tree-item tree-${node.type}`;
+    item.style.paddingLeft = `${6 + depth * 14}px`;
+    item.dataset.path = node.path;
+
+    if (node.type === "dir") {
+      const arrow = document.createElement("span");
+      arrow.className = "tree-arrow";
+      arrow.textContent = "▶";
+      item.appendChild(arrow);
+
+      const icon = document.createElement("span");
+      icon.textContent = "📁 ";
+      item.appendChild(icon);
+
+      const name = document.createElement("span");
+      name.textContent = node.name;
+      item.appendChild(name);
+
+      const childrenContainer = document.createElement("div");
+      childrenContainer.className = "tree-children";
+
+      if (node.children && Object.keys(node.children).length > 0) {
+        childrenContainer.appendChild(renderTreeNodes(node.children, depth + 1));
+      }
+
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const isOpen = childrenContainer.classList.contains("open");
+        childrenContainer.classList.toggle("open", !isOpen);
+        arrow.classList.toggle("open", !isOpen);
+        icon.textContent = isOpen ? "📁 " : "📂 ";
+      });
+
+      li.appendChild(item);
+      li.appendChild(childrenContainer);
+    } else {
+      const spacer = document.createElement("span");
+      spacer.style.display = "inline-block";
+      spacer.style.width = "14px";
+      item.appendChild(spacer);
+
+      const icon = document.createElement("span");
+      icon.textContent = "📄 ";
+      item.appendChild(icon);
+
+      const name = document.createElement("span");
+      name.textContent = node.name;
+      item.appendChild(name);
+
+      item.addEventListener("click", (e) => {
+        e.stopPropagation();
+        openFile(node.path, item);
+      });
+
+      li.appendChild(item);
+    }
+
+    ul.appendChild(li);
+  }
+
+  return ul;
+}
+
+async function loadFileTree() {
+  const treeEl = document.getElementById("file-tree");
+  treeEl.innerHTML = '<p class="tree-empty">Učitavam...</p>';
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/files`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const entries = await res.json();
+    treeEl.innerHTML = "";
+    if (!entries.length) {
+      treeEl.innerHTML = '<p class="tree-empty">Workspace je prazan.</p>';
+      return;
+    }
+    const tree = flatToTree(entries);
+    treeEl.appendChild(renderTreeNodes(tree, 0));
+  } catch (err) {
+    treeEl.innerHTML = `<p class="tree-empty">Greška: ${err.message}</p>`;
+  }
+}
+
+let activeTreeItem = null;
+
+async function openFile(filePath, itemEl) {
+  if (!editor) {
+    showEditorStatus("Editor se još učitava...");
+    return;
+  }
+  showEditorStatus("Učitavam...");
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(filePath)}`);
+    if (!res.ok) {
+      const msg = await res.text();
+      showEditorStatus(`Greška: ${msg}`);
+      return;
+    }
+    const content = await res.text();
+    editor.setValue(content);
+
+    const filename = filePath.split("/").pop();
+    document.getElementById("filename-input").value = filename;
+    updateLanguageFromFilename();
+
+    currentOpenFilePath = filePath;
+    showEditorStatus(`Otvoren: ${filePath}`);
+
+    // Update active highlight in tree
+    if (activeTreeItem) activeTreeItem.classList.remove("active");
+    if (itemEl) { itemEl.classList.add("active"); activeTreeItem = itemEl; }
+  } catch (err) {
+    showEditorStatus(`Greška: ${err.message}`);
+  }
+}
+
+async function saveFile() {
+  if (!editor) return;
+  const filePath = currentOpenFilePath || document.getElementById("filename-input").value.trim();
+  if (!filePath) {
+    showEditorStatus("Unesite naziv fajla u toolbar.");
+    return;
+  }
+  const content = editor.getValue();
+  showEditorStatus("Snimam...");
+  try {
+    const res = await fetch(`${BACKEND_BASE}/api/files/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: filePath, content }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showEditorStatus(`Greška: ${data.error || "nepoznata greška"}`);
+      return;
+    }
+    if (!currentOpenFilePath) {
+      currentOpenFilePath = filePath;
+      loadFileTree(); // refresh tree to show newly created file
+    }
+    showEditorStatus(`Sačuvano ✓  ${filePath}`);
+  } catch (err) {
+    showEditorStatus(`Greška: ${err.message}`);
+  }
 }
 
 // ---------- Provider / model dropdowns ----------
@@ -374,40 +559,97 @@ async function sendChat() {
   if (!userText) return;
 
   let finalUserContent = userText;
-  if (includeContext.checked && editor) {
+  const hasContext = includeContext.checked && !!editor;
+  if (hasContext) {
     const code = editor.getValue();
     const filename = document.getElementById("filename-input").value || "untitled";
     finalUserContent = `Fajl: ${filename}\n\`\`\`\n${code}\n\`\`\`\n\nPitanje: ${userText}`;
   }
 
-  lastMessageHadContext = includeContext.checked;
+  lastMessageHadContext = hasContext;
   appendMessage("user", userText);
   chatHistory.push({ role: "user", content: finalUserContent });
   chatInput.value = "";
   sendBtn.disabled = true;
   statusEl.textContent = "Čekam odgovor...";
 
+  // Create the assistant message container immediately so text can stream into it
+  const assistantDiv = document.createElement("div");
+  assistantDiv.className = "msg assistant";
+  const roleLabel = document.createElement("div");
+  roleLabel.className = "role-label";
+  roleLabel.textContent = "AI";
+  assistantDiv.appendChild(roleLabel);
+  const streamSpan = document.createElement("span");
+  streamSpan.className = "msg-text";
+  streamSpan.textContent = "▌";
+  assistantDiv.appendChild(streamSpan);
+  chatLog.appendChild(assistantDiv);
+  chatLog.scrollTop = chatLog.scrollHeight;
+
   const provider = providerSelect.value;
   const model = modelSelect.value;
   const ollamaUrl = localStorage.getItem("decursor_ollama_url") || "";
 
+  let fullText = "";
+
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/chat`, {
+    const res = await fetch(`${BACKEND_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ provider, model, messages: chatHistory, ollamaUrl }),
     });
-    const data = await res.json();
 
     if (!res.ok) {
-      appendMessage("assistant", `Greška: ${data.error || "nepoznata greška"}`);
+      const errData = await res.json().catch(() => ({ error: res.statusText }));
+      fullText = `Greška: ${errData.error || "nepoznata greška"}`;
     } else {
-      appendMessage("assistant", data.text || "(prazan odgovor)");
-      chatHistory.push({ role: "assistant", content: data.text || "" });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let streamDone = false;
+
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // Split on newlines; keep any incomplete trailing line in buffer
+        const lines = buffer.split("\n");
+        buffer = lines.pop();
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const raw = trimmed.slice(5).trim();
+          if (raw === "[DONE]") { streamDone = true; break outer; }
+          try {
+            const parsed = JSON.parse(raw);
+            if (parsed.delta != null) {
+              fullText += parsed.delta;
+              streamSpan.textContent = fullText + "▌";
+              chatLog.scrollTop = chatLog.scrollHeight;
+            }
+            if (parsed.error) {
+              fullText = fullText
+                ? fullText + `\n\n[Greška: ${parsed.error}]`
+                : `Greška: ${parsed.error}`;
+              streamDone = true;
+              break outer;
+            }
+          } catch (_) { /* skip malformed SSE lines */ }
+        }
+      }
     }
   } catch (err) {
-    appendMessage("assistant", `Greška u konekciji: ${err.message}`);
+    fullText = `Greška u konekciji: ${err.message}`;
   } finally {
+    // Replace streaming span with properly rendered content
+    streamSpan.remove();
+    const rendered = renderAssistantMessage(fullText || "(prazan odgovor)", lastMessageHadContext);
+    assistantDiv.appendChild(rendered);
+    chatLog.scrollTop = chatLog.scrollHeight;
+
+    if (fullText) chatHistory.push({ role: "assistant", content: fullText });
+
     sendBtn.disabled = false;
     statusEl.textContent = "";
   }
@@ -539,3 +781,18 @@ async function githubPush() {
 
 document.getElementById("gh-pull-btn").addEventListener("click", githubPull);
 document.getElementById("gh-push-btn").addEventListener("click", githubPush);
+
+// ---------- File tree & Save wiring ----------
+document.getElementById("save-btn").addEventListener("click", saveFile);
+document.getElementById("refresh-tree-btn").addEventListener("click", loadFileTree);
+
+// Ctrl+S / Cmd+S shortcut to save
+document.addEventListener("keydown", (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+    e.preventDefault();
+    saveFile();
+  }
+});
+
+// Load file tree on startup
+loadFileTree();
