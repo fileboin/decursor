@@ -402,15 +402,166 @@ function showEditorStatus(msg) {
   el._statusTimer = setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
+// ---------- Line diff algorithm ----------
+
+/**
+ * Compute a line-by-line diff between two strings using LCS.
+ * Returns [{type: "added"|"removed"|"unchanged", line: string}].
+ * Falls back to a simple add/remove for very large inputs.
+ */
+function computeLineDiff(oldStr, newStr) {
+  const toLines = (s) => {
+    if (s === "") return [];
+    const parts = s.split("\n");
+    if (parts[parts.length - 1] === "") parts.pop();
+    return parts;
+  };
+  const oldLines = toLines(oldStr);
+  const newLines = toLines(newStr);
+  const m = oldLines.length;
+  const n = newLines.length;
+
+  // For very large files skip LCS to avoid freezing the browser
+  if (m * n > 600000) {
+    const result = [];
+    for (const line of oldLines) result.push({ type: "removed", line });
+    for (const line of newLines) result.push({ type: "added",   line });
+    return result;
+  }
+
+  // Build LCS table
+  const dp = [];
+  for (let i = 0; i <= m; i++) dp.push(new Int32Array(n + 1));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
+        ? dp[i - 1][j - 1] + 1
+        : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  // Backtrack to produce diff
+  const result = [];
+  let i = m, j = n;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
+      result.unshift({ type: "unchanged", line: oldLines[i - 1] });
+      i--; j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: "added",   line: newLines[j - 1] });
+      j--;
+    } else {
+      result.unshift({ type: "removed", line: oldLines[i - 1] });
+      i--;
+    }
+  }
+  return result;
+}
+
+// ---------- Diff modal ----------
+
+/**
+ * Show a diff modal comparing oldCode (current file) with newCode (proposed).
+ * Returns a Promise that resolves to true (Accept) or false (Reject).
+ */
+function showDiffModal(oldCode, newCode) {
+  return new Promise((resolve) => {
+    const modal    = document.getElementById("diff-modal");
+    const diffView = document.getElementById("diff-view");
+    const subtitle = document.getElementById("diff-modal-subtitle");
+
+    const isNewFile = oldCode === "";
+    subtitle.textContent = isNewFile
+      ? `Novi fajl — ${currentOpenFilePath || "nepoznat"} (sav sadržaj je novi)`
+      : `Fajl: ${currentOpenFilePath || "nepoznat"}`;
+
+    diffView.innerHTML = "";
+    const changes = computeLineDiff(oldCode, newCode);
+
+    if (changes.length === 0) {
+      const div = document.createElement("div");
+      div.className = "diff-line diff-line-unchanged";
+      div.textContent = "  (nema izmjena)";
+      diffView.appendChild(div);
+    } else {
+      for (const { type, line } of changes) {
+        const div = document.createElement("div");
+        div.className = `diff-line diff-line-${type}`;
+        const prefix = type === "added" ? "+" : type === "removed" ? "-" : " ";
+        div.textContent = prefix + " " + line;
+        diffView.appendChild(div);
+      }
+    }
+
+    modal.classList.add("open");
+
+    const acceptBtn = document.getElementById("diff-accept-btn");
+    const rejectBtn = document.getElementById("diff-reject-btn");
+
+    function cleanup() {
+      modal.classList.remove("open");
+      acceptBtn.removeEventListener("click", onAccept);
+      rejectBtn.removeEventListener("click", onReject);
+    }
+    function onAccept() { cleanup(); resolve(true);  }
+    function onReject() { cleanup(); resolve(false); }
+
+    acceptBtn.addEventListener("click", onAccept);
+    rejectBtn.addEventListener("click", onReject);
+  });
+}
+
+// ---------- Exec confirm modal ----------
+
+/**
+ * Show a confirmation modal before executing a shell command.
+ * Returns a Promise that resolves to true (run) or false (cancel).
+ */
+function showExecConfirmModal(command) {
+  return new Promise((resolve) => {
+    const modal = document.getElementById("exec-confirm-modal");
+    document.getElementById("exec-confirm-cmd").textContent = command;
+    modal.classList.add("open");
+
+    const acceptBtn = document.getElementById("exec-accept-btn");
+    const rejectBtn = document.getElementById("exec-reject-btn");
+
+    function cleanup() {
+      modal.classList.remove("open");
+      acceptBtn.removeEventListener("click", onAccept);
+      rejectBtn.removeEventListener("click", onReject);
+    }
+    function onAccept() { cleanup(); resolve(true);  }
+    function onReject() { cleanup(); resolve(false); }
+
+    acceptBtn.addEventListener("click", onAccept);
+    rejectBtn.addEventListener("click", onReject);
+  });
+}
+
 /**
  * Write `code` to the currently open workspace file via /api/files/write,
  * then refresh the Monaco editor with the new content.
+ * Shows a diff preview first; only writes on Accept.
  */
 async function applyToFile(code) {
   if (!currentOpenFilePath) {
     showEditorStatus("Nema otvorenog fajla za primjenu.");
     return;
   }
+
+  // Fetch current file content for diff (empty string = new file → show all as added)
+  let oldContent = "";
+  try {
+    const readRes = await apiFetch(
+      `${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(currentOpenFilePath)}`
+    );
+    if (readRes.ok) oldContent = await readRes.text();
+  } catch (_) { /* treat as new file */ }
+
+  const accepted = await showDiffModal(oldContent, code);
+  if (!accepted) return;
+
   showEditorStatus("Primjenjujem na fajl...");
   try {
     const res = await apiFetch(`${BACKEND_BASE}/api/files/write`, {
@@ -425,7 +576,11 @@ async function applyToFile(code) {
     }
     if (editor) {
       editor.pushUndoStop();
-      editor.getModel().pushEditOperations([], [{ range: editor.getModel().getFullModelRange(), text: code }], () => null);
+      editor.getModel().pushEditOperations(
+        [],
+        [{ range: editor.getModel().getFullModelRange(), text: code }],
+        () => null
+      );
       editor.pushUndoStop();
     }
     showEditorStatus(`Sačuvano i primjenjeno ✓  ${currentOpenFilePath}`);
@@ -479,10 +634,11 @@ function createCodeBlockEl(code, lang, hadContext, isSoleBlock) {
     const btnRun = document.createElement("button");
     btnRun.className = "btn-code-action btn-run-terminal";
     btnRun.textContent = "▶ Terminal";
-    btnRun.title = "Pokreni u terminal panelu (/api/exec)";
+    btnRun.title = "Pokreni u terminal panelu (/api/exec) — prikazuje potvrdu";
     btnRun.addEventListener("click", async (e) => {
       e.stopPropagation();
-      await runInTerminal(code);
+      const confirmed = await showExecConfirmModal(code);
+      if (confirmed) await runInTerminal(code);
     });
     btnGroup.appendChild(btnRun);
   }
