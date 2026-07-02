@@ -474,6 +474,19 @@ function createCodeBlockEl(code, lang, hadContext, isSoleBlock) {
   btnReplace.addEventListener("click", (e) => { e.stopPropagation(); applyToEditor(code, "replace"); });
   btnGroup.appendChild(btnReplace);
 
+  // "Run in terminal" button — only for shell-type code blocks
+  if (lang === "bash" || lang === "sh" || lang === "shell") {
+    const btnRun = document.createElement("button");
+    btnRun.className = "btn-code-action btn-run-terminal";
+    btnRun.textContent = "▶ Terminal";
+    btnRun.title = "Pokreni u terminal panelu (/api/exec)";
+    btnRun.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await runInTerminal(code);
+    });
+    btnGroup.appendChild(btnRun);
+  }
+
   // "Apply to file" button — saves code directly to the currently open workspace file
   if (currentOpenFilePath) {
     const btnApply = document.createElement("button");
@@ -800,6 +813,104 @@ document.addEventListener("keydown", (e) => {
   if ((e.ctrlKey || e.metaKey) && e.key === "s") {
     e.preventDefault();
     saveFile();
+  }
+});
+
+// ---------- Terminal ----------
+
+const terminalCmdHistory = []; // in-memory command history (arrow-up/down)
+let terminalHistoryIdx = -1;   // -1 = not navigating
+let terminalDraftCmd = "";     // saved draft when starting history navigation
+
+function toggleTerminal(forceOpen) {
+  const pane = document.getElementById("terminal-pane");
+  const willOpen = forceOpen !== undefined ? forceOpen : !pane.classList.contains("open");
+  pane.classList.toggle("open", willOpen);
+  if (willOpen) {
+    document.getElementById("terminal-cmd-input").focus();
+  }
+}
+
+function appendTerminalLine(text, type) {
+  const output = document.getElementById("terminal-output");
+  if (!output) return;
+  const span = document.createElement("span");
+  span.className = `term-${type}`;
+  span.textContent = text;
+  output.appendChild(span);
+  output.scrollTop = output.scrollHeight;
+}
+
+async function runInTerminal(command) {
+  toggleTerminal(true);
+  const cmdInput = document.getElementById("terminal-cmd-input");
+  if (cmdInput) {
+    cmdInput.disabled = true;
+    cmdInput.value = "";
+  }
+
+  appendTerminalLine(`$ ${command}\n`, "prompt");
+
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/exec`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ command }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      appendTerminalLine(`Greška: ${data.error || "nepoznata greška"}\n`, "stderr");
+    } else {
+      if (data.stdout) {
+        appendTerminalLine(data.stdout.endsWith("\n") ? data.stdout : data.stdout + "\n", "stdout");
+      }
+      if (data.stderr) {
+        appendTerminalLine(data.stderr.endsWith("\n") ? data.stderr : data.stderr + "\n", "stderr");
+      }
+      if (data.exitCode !== 0) {
+        appendTerminalLine(`[exit ${data.exitCode}]\n`, "info");
+      }
+    }
+  } catch (err) {
+    appendTerminalLine(`Greška konekcije: ${err.message}\n`, "stderr");
+  } finally {
+    if (cmdInput) {
+      cmdInput.disabled = false;
+      cmdInput.focus();
+    }
+  }
+}
+
+document.getElementById("terminal-toggle-btn").addEventListener("click", () => toggleTerminal());
+document.getElementById("terminal-close-btn").addEventListener("click", () => toggleTerminal(false));
+document.getElementById("terminal-clear-btn").addEventListener("click", () => {
+  const output = document.getElementById("terminal-output");
+  if (output) output.innerHTML = "";
+});
+
+const termCmdInput = document.getElementById("terminal-cmd-input");
+termCmdInput.addEventListener("keydown", async (e) => {
+  if (e.key === "Enter") {
+    const command = termCmdInput.value.trim();
+    if (!command) return;
+    // Push to history (avoid duplicates at the front)
+    if (terminalCmdHistory[0] !== command) {
+      terminalCmdHistory.unshift(command);
+    }
+    terminalHistoryIdx = -1;
+    terminalDraftCmd = "";
+    await runInTerminal(command);
+  } else if (e.key === "ArrowUp") {
+    e.preventDefault();
+    if (!terminalCmdHistory.length) return;
+    if (terminalHistoryIdx === -1) terminalDraftCmd = termCmdInput.value;
+    terminalHistoryIdx = Math.min(terminalHistoryIdx + 1, terminalCmdHistory.length - 1);
+    termCmdInput.value = terminalCmdHistory[terminalHistoryIdx];
+  } else if (e.key === "ArrowDown") {
+    e.preventDefault();
+    if (terminalHistoryIdx === -1) return;
+    terminalHistoryIdx--;
+    termCmdInput.value = terminalHistoryIdx === -1 ? terminalDraftCmd : terminalCmdHistory[terminalHistoryIdx];
   }
 });
 
