@@ -35,6 +35,17 @@ const apiLimiter = rateLimit({
 
 app.use("/api/", apiLimiter);
 
+// ─── Auth middleware ──────────────────────────────────────────────────────────
+const DECURSOR_ACCESS_KEY = process.env.DECURSOR_ACCESS_KEY || "";
+app.use("/api/", (req, res, next) => {
+  if (!DECURSOR_ACCESS_KEY) return next();
+  const provided = req.headers["x-decursor-key"];
+  if (!provided || provided !== DECURSOR_ACCESS_KEY) {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+  next();
+});
+
 // ─── NEW: POST /api/chat/stream ───────────────────────────────────────────────
 /**
  * POST /api/chat/stream

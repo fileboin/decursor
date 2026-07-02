@@ -161,6 +161,25 @@ let editor;
 let chatHistory = []; // {role, content}
 let lastMessageHadContext = false; // tracks whether last user msg included editor code
 let currentOpenFilePath = null; // workspace-relative path of the currently open file
+const selectedFiles = new Set(); // workspace-relative paths checked for multi-file context
+
+// ---------- Auth ----------
+let accessKey = "";
+{
+  const k = prompt("Decursor pristupni ključ (ostavite prazno ako nije podešen):");
+  accessKey = (k !== null) ? k.trim() : "";
+}
+
+/**
+ * Wrapper around fetch() that automatically injects the x-decursor-key header
+ * on every /api/ request.
+ */
+function apiFetch(url, options) {
+  const opts = options ? { ...options } : {};
+  opts.headers = { ...(opts.headers || {}) };
+  if (accessKey) opts.headers["x-decursor-key"] = accessKey;
+  return fetch(url, opts);
+}
 
 // ---------- Monaco setup ----------
 require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
@@ -264,9 +283,26 @@ function renderTreeNodes(childrenMap, depth) {
       li.appendChild(item);
       li.appendChild(childrenContainer);
     } else {
+      // Checkbox for multi-file context selection
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.className = "file-checkbox";
+      cb.checked = selectedFiles.has(node.path);
+      cb.title = "Dodaj u kontekst chata";
+      cb.addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (cb.checked) {
+          selectedFiles.add(node.path);
+        } else {
+          selectedFiles.delete(node.path);
+        }
+        updateSelectedFilesCount();
+      });
+      item.appendChild(cb);
+
       const spacer = document.createElement("span");
       spacer.style.display = "inline-block";
-      spacer.style.width = "14px";
+      spacer.style.width = "6px";
       item.appendChild(spacer);
 
       const icon = document.createElement("span");
@@ -295,7 +331,7 @@ async function loadFileTree() {
   const treeEl = document.getElementById("file-tree");
   treeEl.innerHTML = '<p class="tree-empty">Učitavam...</p>';
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/files`);
+    const res = await apiFetch(`${BACKEND_BASE}/api/files`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const entries = await res.json();
     treeEl.innerHTML = "";
@@ -310,6 +346,19 @@ async function loadFileTree() {
   }
 }
 
+/** Update the selected-files counter shown above the chat input. */
+function updateSelectedFilesCount() {
+  const el = document.getElementById("selected-files-info");
+  if (!el) return;
+  if (selectedFiles.size === 0) {
+    el.style.display = "none";
+    el.textContent = "";
+  } else {
+    el.style.display = "block";
+    el.textContent = `📎 ${selectedFiles.size} fajl${selectedFiles.size === 1 ? "" : "a"} selektovano za kontekst`;
+  }
+}
+
 let activeTreeItem = null;
 
 async function openFile(filePath, itemEl) {
@@ -319,7 +368,7 @@ async function openFile(filePath, itemEl) {
   }
   showEditorStatus("Učitavam...");
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(filePath)}`);
+    const res = await apiFetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(filePath)}`);
     if (!res.ok) {
       const msg = await res.text();
       showEditorStatus(`Greška: ${msg}`);
@@ -353,7 +402,7 @@ async function saveFile() {
   const content = editor.getValue();
   showEditorStatus("Snimam...");
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/files/write`, {
+    const res = await apiFetch(`${BACKEND_BASE}/api/files/write`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: filePath, content }),
@@ -461,6 +510,38 @@ function showEditorStatus(msg) {
   el._statusTimer = setTimeout(() => { el.textContent = ""; }, 4000);
 }
 
+/**
+ * Write `code` to the currently open workspace file via /api/files/write,
+ * then refresh the Monaco editor with the new content.
+ */
+async function applyToFile(code) {
+  if (!currentOpenFilePath) {
+    showEditorStatus("Nema otvorenog fajla za primjenu.");
+    return;
+  }
+  showEditorStatus("Primjenjujem na fajl...");
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/files/write`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: currentOpenFilePath, content: code }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showEditorStatus(`Greška: ${data.error || "nepoznata greška"}`);
+      return;
+    }
+    if (editor) {
+      editor.pushUndoStop();
+      editor.getModel().pushEditOperations([], [{ range: editor.getModel().getFullModelRange(), text: code }], () => null);
+      editor.pushUndoStop();
+    }
+    showEditorStatus(`Sačuvano i primjenjeno ✓  ${currentOpenFilePath}`);
+  } catch (err) {
+    showEditorStatus(`Greška: ${err.message}`);
+  }
+}
+
 /** Build a styled code block element with "insert at cursor" and "replace editor" buttons. */
 function createCodeBlockEl(code, lang, hadContext, isSoleBlock) {
   const wrapper = document.createElement("div");
@@ -500,6 +581,20 @@ function createCodeBlockEl(code, lang, hadContext, isSoleBlock) {
   }
   btnReplace.addEventListener("click", (e) => { e.stopPropagation(); applyToEditor(code, "replace"); });
   btnGroup.appendChild(btnReplace);
+
+  // "Apply to file" button — saves code directly to the currently open workspace file
+  if (currentOpenFilePath) {
+    const btnApply = document.createElement("button");
+    btnApply.className = "btn-code-action btn-code-apply-file";
+    const fname = currentOpenFilePath.split("/").pop();
+    btnApply.textContent = `💾 ${fname}`;
+    btnApply.title = `Upiši kod u ${currentOpenFilePath} i osvježi editor`;
+    btnApply.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      await applyToFile(code);
+    });
+    btnGroup.appendChild(btnApply);
+  }
 
   header.appendChild(btnGroup);
   wrapper.appendChild(header);
@@ -591,13 +686,35 @@ async function sendChat() {
   const model = modelSelect.value;
   const ollamaUrl = localStorage.getItem("decursor_ollama_url") || "";
 
+  // Build system messages from selected files
+  const selectedFilesList = [...selectedFiles];
+  let prefixMessages = [];
+  if (selectedFilesList.length > 0) {
+    const fileContents = [];
+    for (const fp of selectedFilesList) {
+      try {
+        const fRes = await apiFetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(fp)}`);
+        if (fRes.ok) {
+          const content = await fRes.text();
+          fileContents.push(`### ${fp}\n\`\`\`\n${content}\n\`\`\``);
+        }
+      } catch (_) { /* skip unreadable files */ }
+    }
+    if (fileContents.length > 0) {
+      prefixMessages = [{
+        role: "system",
+        content: `Kontekst selektovanih fajlova:\n\n${fileContents.join("\n\n")}`,
+      }];
+    }
+  }
+
   let fullText = "";
 
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/chat/stream`, {
+    const res = await apiFetch(`${BACKEND_BASE}/api/chat/stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ provider, model, messages: chatHistory, ollamaUrl }),
+      body: JSON.stringify({ provider, model, messages: [...prefixMessages, ...chatHistory], ollamaUrl }),
     });
 
     if (!res.ok) {
@@ -710,7 +827,7 @@ async function githubPull() {
 
   ghStatus.textContent = "Učitavam...";
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/github/pull`, {
+    const res = await apiFetch(`${BACKEND_BASE}/api/github/pull`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, owner, repo: repoName, branch, path }),
@@ -761,7 +878,7 @@ async function githubPush() {
 
   ghStatus.textContent = "Saljem...";
   try {
-    const res = await fetch(`${BACKEND_BASE}/api/github/push`, {
+    const res = await apiFetch(`${BACKEND_BASE}/api/github/push`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token, owner, repo: repoName, branch, path, content, message }),
