@@ -187,6 +187,115 @@
   }
   .icon-btn:hover { background: var(--secondary-hover); color: var(--text); }
 
+  /* ── Home menu wrapper & dropdown ── */
+  #home-menu-wrapper {
+    position: relative;
+    flex-shrink: 0;
+  }
+  #home-btn {
+    font-size: 17px;
+    min-width: 34px;
+    padding: 4px 9px;
+  }
+  #home-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 1000;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    min-width: 210px;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.4);
+    display: flex;
+    flex-direction: column;
+  }
+  #home-dropdown.hidden { display: none; }
+  .dd-section {
+    padding: 8px 10px;
+  }
+  .dd-section + .dd-section {
+    border-top: 1px solid var(--border);
+  }
+  .dd-label {
+    font-size: 10px;
+    color: var(--text);
+    opacity: 0.55;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    margin-bottom: 6px;
+  }
+  .dd-row {
+    display: flex;
+    gap: 6px;
+  }
+  .dd-btn {
+    background: var(--input-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-size: 13px;
+    font-weight: normal;
+    cursor: pointer;
+    flex: 1;
+    text-align: center;
+    line-height: 1.3;
+    min-height: unset;
+  }
+  .dd-btn:hover { background: var(--secondary-hover); color: var(--text); }
+  .dd-btn.dd-active {
+    background: var(--accent);
+    color: var(--btn-primary-text);
+    border-color: var(--accent);
+  }
+  .dd-btn.dd-active:hover { background: var(--accent-hover); }
+  .dd-btn.dd-full { width: 100%; flex: none; }
+
+  /* ── Separator between Home and the right button group ── */
+  .topbar-sep {
+    width: 1px;
+    height: 22px;
+    background: var(--border);
+    margin: 0 2px;
+    flex-shrink: 0;
+    align-self: center;
+  }
+
+  /* ── Pay to Use modal ── */
+  #pay-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    z-index: 2000;
+    align-items: center;
+    justify-content: center;
+    padding: 12px;
+  }
+  #pay-modal.open { display: flex; }
+  #pay-modal-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 32px 28px 24px;
+    max-width: 380px;
+    width: 100%;
+    text-align: center;
+  }
+  #pay-modal-content h2 {
+    margin: 0 0 12px;
+    font-size: 18px;
+    color: var(--accent);
+  }
+  #pay-modal-content p {
+    margin: 0 0 24px;
+    color: var(--text);
+    opacity: 0.85;
+    line-height: 1.5;
+    font-size: 14px;
+  }
+
   #layout {
     display: flex;
     flex: 1;
@@ -1069,6 +1178,32 @@
 <div id="topbar">
   <h1>Decursor</h1>
 
+  <!-- Home menu -->
+  <div id="home-menu-wrapper">
+    <button id="home-btn" class="icon-btn" title="Meni">☰</button>
+    <div id="home-dropdown" class="hidden">
+      <div class="dd-section">
+        <div class="dd-label">Tema</div>
+        <div class="dd-row">
+          <button id="theme-light-btn" class="dd-btn">☀️ Light</button>
+          <button id="theme-dark-btn" class="dd-btn">🌙 Dark</button>
+        </div>
+      </div>
+      <div class="dd-section">
+        <div class="dd-label">Veličina fonta</div>
+        <div class="dd-row">
+          <button id="font-decrease-btn" class="dd-btn" title="Smanji font">A−</button>
+          <button id="font-increase-btn" class="dd-btn" title="Povećaj font">A+</button>
+        </div>
+      </div>
+      <div class="dd-section">
+        <button id="pay-to-use-btn" class="dd-btn dd-full">💳 Pay to Use</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="topbar-sep"></div>
+
   <select id="provider-select">
     <option value="openrouter">OpenRouter</option>
     <option value="ollama">Ollama (self-hosted)</option>
@@ -1097,9 +1232,6 @@
 
   <button class="secondary" id="github-btn">GitHub</button>
   <button class="secondary" id="wordpress-btn">WordPress</button>
-  <button class="icon-btn" id="theme-toggle-btn" title="Prebaci temu (svetla/tamna)">☀️</button>
-  <button class="icon-btn" id="font-decrease-btn" title="Smanji font (A-)">A−</button>
-  <button class="icon-btn" id="font-increase-btn" title="Povećaj font (A+)">A+</button>
 </div>
 
 <div id="layout">
@@ -1279,6 +1411,15 @@
       <button id="wp-draft-save-btn">💾 Sačuvaj kao draft</button>
       <button class="secondary" id="wp-draft-close-btn">Otkaži</button>
     </div>
+  </div>
+</div>
+
+<!-- Pay to Use modal -->
+<div id="pay-modal">
+  <div id="pay-modal-content">
+    <h2>💳 Pay to Use</h2>
+    <p>Uskoro dostupno — platform za plaćanje po korišćenju</p>
+    <button id="pay-modal-close-btn">Zatvori</button>
   </div>
 </div>
 
