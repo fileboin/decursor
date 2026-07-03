@@ -370,8 +370,10 @@
     background: #4ec94e;
   }
 
-  /* ── MCP modal (placeholder) ── */
-  #mcp-modal {
+  /* ── MCP modals ── */
+  #mcp-manage-modal,
+  #mcp-connect-modal,
+  #mcp-settings-modal {
     display: none;
     position: fixed;
     inset: 0;
@@ -381,8 +383,88 @@
     justify-content: center;
     padding: 12px;
   }
-  #mcp-modal.open { display: flex; }
-  #mcp-modal-content {
+  #mcp-manage-modal.open,
+  #mcp-connect-modal.open,
+  #mcp-settings-modal.open { display: flex; }
+
+  /* Manage panel */
+  #mcp-manage-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    width: 90%;
+    max-width: 520px;
+    display: flex;
+    flex-direction: column;
+    max-height: 80vh;
+    max-height: 80dvh;
+    overflow: hidden;
+  }
+  #mcp-manage-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #mcp-manage-header h2 { margin: 0; font-size: 15px; }
+  #mcp-server-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 0;
+    min-height: 60px;
+  }
+  .mcp-list-empty {
+    font-size: 12px;
+    opacity: 0.45;
+    padding: 16px;
+    margin: 0;
+    text-align: center;
+  }
+  .mcp-server-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .mcp-server-item:last-child { border-bottom: none; }
+  .mcp-server-icon { font-size: 20px; flex-shrink: 0; width: 26px; text-align: center; }
+  .mcp-server-meta { flex: 1; min-width: 0; }
+  .mcp-server-name { font-size: 13px; font-weight: 600; }
+  .mcp-server-desc {
+    font-size: 11px;
+    opacity: 0.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 2px;
+  }
+  .mcp-status-badge {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+  }
+  .mcp-status-connected    { background: var(--btn-green-bg);      color: var(--btn-green-fg);      border-color: var(--btn-green-border); }
+  .mcp-status-disconnected { background: var(--input-bg);           color: var(--text); opacity: 0.6; border-color: var(--border); }
+  .mcp-status-error        { background: var(--diff-removed-bg);    color: var(--diff-removed-fg);   border-color: #6a2020; }
+  #mcp-manage-footer {
+    display: flex;
+    gap: 8px;
+    padding: 10px 16px;
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #mcp-manage-footer button { font-size: 12px; padding: 5px 10px; min-height: unset; }
+
+  /* Small placeholder modals (Connect / Settings) */
+  #mcp-connect-content,
+  #mcp-settings-content {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -391,18 +473,10 @@
     width: 100%;
     text-align: center;
   }
-  #mcp-modal-content h2 {
-    margin: 0 0 12px;
-    font-size: 18px;
-    color: var(--accent);
-  }
-  #mcp-modal-content p {
-    margin: 0 0 24px;
-    color: var(--text);
-    opacity: 0.85;
-    line-height: 1.5;
-    font-size: 14px;
-  }
+  #mcp-connect-content h2,
+  #mcp-settings-content h2 { margin: 0 0 12px; font-size: 18px; color: var(--accent); }
+  #mcp-connect-content p,
+  #mcp-settings-content p  { margin: 0 0 24px; color: var(--text); opacity: 0.85; line-height: 1.5; font-size: 14px; }
 
   #layout {
     display: flex;
@@ -1285,6 +1359,24 @@
     flex: 1;
     min-width: 0;
   }
+
+  /* ── MCP modals — mobile ── */
+  @media (max-width: 768px) {
+    #mcp-manage-modal,
+    #mcp-connect-modal,
+    #mcp-settings-modal { align-items: flex-end; padding: 0; }
+    #mcp-manage-content {
+      width: 100%; max-width: 100%;
+      border-radius: 12px 12px 0 0;
+      max-height: 90vh; max-height: 90dvh;
+    }
+    #mcp-connect-content,
+    #mcp-settings-content {
+      width: 100%; max-width: 100%;
+      border-radius: 12px 12px 0 0;
+      padding: 24px 20px 32px;
+    }
+  }
 </style>
 </head>
 <body>
@@ -1324,7 +1416,13 @@
         <button id="pay-to-use-btn" class="dd-btn dd-full">💰 Pay to Use</button>
       </div>
       <div class="dd-section">
-        <button id="mcp-btn" class="dd-btn dd-full">🔌 MCP</button>
+        <div class="dd-label">MCP</div>
+        <div style="display:flex;flex-direction:column;gap:4px;">
+          <button id="mcp-connect-btn" class="dd-btn dd-full">⚡ Connect MCP</button>
+          <button id="mcp-add-btn"     class="dd-btn dd-full">＋ Add MCP Server</button>
+          <button id="mcp-manage-btn"  class="dd-btn dd-full">🗂 Manage MCP</button>
+          <button id="mcp-settings-btn" class="dd-btn dd-full">⚙ MCP Settings</button>
+        </div>
       </div>
       <!-- TODO: dodati nove stavke menija ovde -->
     </div>
@@ -1551,12 +1649,38 @@
   </div>
 </div>
 
-<!-- MCP modal (placeholder) -->
-<div id="mcp-modal">
-  <div id="mcp-modal-content">
-    <h2>🔌 MCP</h2>
-    <p>Uskoro dostupno — integracija sa Model Context Protocol serverima</p>
-    <button id="mcp-modal-close-btn">Zatvori</button>
+<!-- MCP — Manage panel -->
+<div id="mcp-manage-modal">
+  <div id="mcp-manage-content">
+    <div id="mcp-manage-header">
+      <h2>🔌 MCP Serveri</h2>
+      <button class="secondary" id="mcp-manage-close-btn" style="min-height:unset;padding:3px 9px;font-size:13px;">✕</button>
+    </div>
+    <div id="mcp-server-list">
+      <p class="mcp-list-empty">Učitavam…</p>
+    </div>
+    <div id="mcp-manage-footer">
+      <button class="secondary" id="mcp-manage-add-btn">＋ Dodaj server</button>
+      <button class="secondary" id="mcp-manage-refresh-btn">↺ Osvježi</button>
+    </div>
+  </div>
+</div>
+
+<!-- MCP — Connect / Add server (placeholder, popunjava se u Fazi 2) -->
+<div id="mcp-connect-modal">
+  <div id="mcp-connect-content">
+    <h2>⚡ Poveži MCP server</h2>
+    <p>Uskoro — konfiguracija MCP servera (Git, GitHub, Memory, Web Search, Postgres, Playwright…)</p>
+    <button id="mcp-connect-close-btn">Zatvori</button>
+  </div>
+</div>
+
+<!-- MCP — Settings (placeholder) -->
+<div id="mcp-settings-modal">
+  <div id="mcp-settings-content">
+    <h2>⚙ MCP Settings</h2>
+    <p>Uskoro — globalne opcije za MCP integraciju</p>
+    <button id="mcp-settings-close-btn">Zatvori</button>
   </div>
 </div>
 

@@ -1515,20 +1515,100 @@ function toggleAICompletion(enabled) {
   });
 })();
 
-// ---------- MCP modal (placeholder) ----------
+// ---------- MCP ----------
 
-document.getElementById("mcp-btn").addEventListener("click", () => {
+const MCP_MODAL_IDS = ["mcp-manage-modal", "mcp-connect-modal", "mcp-settings-modal"];
+
+MCP_MODAL_IDS.forEach((id) => {
+  document.getElementById(id).addEventListener("click", (e) => {
+    if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
+  });
+});
+
+function openMcpModal(id) {
   homeDropdown.classList.add("hidden");
-  document.getElementById("mcp-modal").classList.add("open");
+  document.getElementById(id).classList.add("open");
+}
+
+document.getElementById("mcp-manage-btn").addEventListener("click", () => {
+  openMcpModal("mcp-manage-modal");
+  loadMcpServers();
+});
+document.getElementById("mcp-connect-btn").addEventListener("click",  () => openMcpModal("mcp-connect-modal"));
+document.getElementById("mcp-add-btn").addEventListener("click",      () => openMcpModal("mcp-connect-modal"));
+document.getElementById("mcp-settings-btn").addEventListener("click", () => openMcpModal("mcp-settings-modal"));
+
+document.getElementById("mcp-manage-close-btn").addEventListener("click",  () => document.getElementById("mcp-manage-modal").classList.remove("open"));
+document.getElementById("mcp-connect-close-btn").addEventListener("click", () => document.getElementById("mcp-connect-modal").classList.remove("open"));
+document.getElementById("mcp-settings-close-btn").addEventListener("click",() => document.getElementById("mcp-settings-modal").classList.remove("open"));
+
+document.getElementById("mcp-manage-refresh-btn").addEventListener("click", loadMcpServers);
+document.getElementById("mcp-manage-add-btn").addEventListener("click", () => {
+  document.getElementById("mcp-manage-modal").classList.remove("open");
+  document.getElementById("mcp-connect-modal").classList.add("open");
 });
 
-document.getElementById("mcp-modal-close-btn").addEventListener("click", () => {
-  document.getElementById("mcp-modal").classList.remove("open");
-});
+async function loadMcpServers() {
+  const list = document.getElementById("mcp-server-list");
+  list.innerHTML = '<p class="mcp-list-empty">Učitavam…</p>';
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/mcp/servers`);
+    const servers = await res.json();
+    if (!servers.length) {
+      list.innerHTML = '<p class="mcp-list-empty">Nema registrovanih MCP servera.</p>';
+      return;
+    }
+    list.innerHTML = "";
+    servers.forEach((s) => list.appendChild(buildMcpServerItem(s)));
+  } catch (err) {
+    list.innerHTML = `<p class="mcp-list-empty" style="color:var(--diff-removed-fg)">Greška: ${err.message}</p>`;
+  }
+}
 
-document.getElementById("mcp-modal").addEventListener("click", (e) => {
-  if (e.target === e.currentTarget) e.currentTarget.classList.remove("open");
-});
+const MCP_STATUS_LABEL = {
+  connected:    "● connected",
+  disconnected: "○ disconnected",
+  error:        "✕ error",
+};
+
+function buildMcpServerItem(server) {
+  const item = document.createElement("div");
+  item.className = "mcp-server-item";
+  item.dataset.serverId = server.id;
+
+  item.innerHTML = `
+    <span class="mcp-server-icon">${server.icon}</span>
+    <div class="mcp-server-meta">
+      <div class="mcp-server-name">${server.name}</div>
+      <div class="mcp-server-desc">${server.description}</div>
+    </div>
+    <span class="mcp-status-badge mcp-status-${server.status}">${MCP_STATUS_LABEL[server.status] ?? server.status}</span>
+    <label class="dd-toggle-switch" title="${server.enabled ? "Isključi" : "Uključi"}">
+      <input type="checkbox" ${server.enabled ? "checked" : ""}/>
+      <span class="dd-toggle-track"></span>
+    </label>
+  `;
+
+  const toggle = item.querySelector("input[type=checkbox]");
+  toggle.addEventListener("change", async () => {
+    toggle.disabled = true;
+    try {
+      const r = await apiFetch(`${BACKEND_BASE}/api/mcp/servers/${server.id}/toggle`, { method: "POST" });
+      const updated = await r.json();
+      const badge = item.querySelector(".mcp-status-badge");
+      badge.className = `mcp-status-badge mcp-status-${updated.status}`;
+      badge.textContent = MCP_STATUS_LABEL[updated.status] ?? updated.status;
+      toggle.checked = updated.enabled;
+    } catch (err) {
+      toggle.checked = !toggle.checked;
+      alert(`Greška: ${err.message}`);
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+
+  return item;
+}
 
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
   if (!wpCreds.siteUrl || !wpCreds.username || !wpCreds.appPassword) {

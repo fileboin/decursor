@@ -22,6 +22,22 @@ const WORKSPACE_DIR = path.resolve(
   process.env.MCP_WORKSPACE_DIR || process.cwd()
 );
 
+// In-memory MCP server registry (extended in Faza 2+)
+const mcpRegistry = [
+  {
+    id: "filesystem",
+    name: "Filesystem",
+    icon: "📁",
+    description: "Čita i piše fajlove u workspace-u",
+    enabled: true,
+  },
+];
+
+function getActiveTools() {
+  const entry = mcpRegistry.find((s) => s.id === "filesystem");
+  return mcpClient.connected && entry?.enabled ? mcpClient.getOpenAITools() : [];
+}
+
 // ── Middleware ──────────────────────────────────────────────────────────────
 
 app.use(cors());
@@ -270,7 +286,7 @@ app.post("/api/chat/stream", async (req, res) => {
   } = req.body;
 
   const messages = [...(initMessages ?? [])];
-  const tools = mcpClient.connected ? mcpClient.getOpenAITools() : [];
+  const tools = getActiveTools();
   const MAX_ROUNDS = 8;
 
   try {
@@ -466,6 +482,33 @@ app.post("/api/wordpress/publish", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// ── MCP registry API ────────────────────────────────────────────────────────
+
+app.get("/api/mcp/servers", (req, res) => {
+  res.json(
+    mcpRegistry.map((s) => ({
+      ...s,
+      status:
+        s.id === "filesystem"
+          ? mcpClient.connected && s.enabled
+            ? "connected"
+            : "disconnected"
+          : "disconnected",
+    }))
+  );
+});
+
+app.post("/api/mcp/servers/:id/toggle", (req, res) => {
+  const entry = mcpRegistry.find((s) => s.id === req.params.id);
+  if (!entry) return res.status(404).json({ error: "Server not found" });
+  entry.enabled = !entry.enabled;
+  const status =
+    entry.id === "filesystem" && mcpClient.connected && entry.enabled
+      ? "connected"
+      : "disconnected";
+  res.json({ id: entry.id, enabled: entry.enabled, status });
 });
 
 // ── Boot ────────────────────────────────────────────────────────────────────
