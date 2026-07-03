@@ -123,6 +123,11 @@ app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Serve monacopilot browser build for inline AI completions
+app.get("/monacopilot.js", (_req, res) =>
+  res.sendFile(path.join(__dirname, "node_modules/monacopilot/dist/index.global.js"))
+);
+
 app.use(
   "/api/",
   rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false })
@@ -190,6 +195,8 @@ app.post("/api/files/write", async (req, res) => {
 });
 
 // ── Models ──────────────────────────────────────────────────────────────────
+// NIKAD ne filtriraj/ograničavaj listu modela sa OpenRouter-a. Vraćaj sve što API vrati.
+// Ako se ovaj endpoint ikad menja, ovo pravilo ostaje — ne dodavaj slice(), filter() niti limit.
 
 app.get("/api/models", async (req, res) => {
   const { provider, ollamaUrl } = req.query;
@@ -199,17 +206,70 @@ app.get("/api/models", async (req, res) => {
         headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
       });
       const data = await r.json();
-      return res.json((data.data ?? []).map((m) => m.id));
+      // Returns {id, name} objects — frontend sorts free models first and filters by search.
+      // NIKAD ne filtriraj/ograničavaj listu modela sa OpenRouter-a.
+      return res.json((data.data ?? []).map((m) => ({ id: m.id, name: m.name || m.id })));
     }
     if (provider === "ollama") {
       const base = ollamaUrl || OLLAMA_URL;
       const r = await fetch(`${base}/api/tags`);
       const data = await r.json();
-      return res.json((data.models ?? []).map((m) => m.name));
+      return res.json((data.models ?? []).map((m) => ({ id: m.name, name: m.name })));
     }
     res.status(400).json({ error: "Unknown provider" });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Inline code completion (Monacopilot) ─────────────────────────────────────
+
+app.post("/api/complete", async (req, res) => {
+  const { completionMetadata } = req.body || {};
+  if (!completionMetadata) return res.json({ completion: null });
+
+  const {
+    textBeforeCursor = "",
+    textAfterCursor  = "",
+    language         = "plaintext",
+    filename         = "",
+  } = completionMetadata;
+
+  if (!OPENROUTER_KEY) return res.json({ completion: null });
+
+  try {
+    const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${OPENROUTER_KEY}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": PUBLIC_URL,
+        "X-Title": "Decursor",
+      },
+      body: JSON.stringify({
+        model: "openai/gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: `You are a code completion assistant. Output ONLY the raw code to insert at the cursor — no explanations, no markdown, no surrounding text. Language: ${language}${filename ? `, File: ${filename}` : ""}.`,
+          },
+          {
+            role: "user",
+            content: `Complete the code at <cursor>.\n\n<before_cursor>\n${textBeforeCursor}\n</before_cursor>\n<cursor/>\n<after_cursor>\n${textAfterCursor}\n</after_cursor>`,
+          },
+        ],
+        max_tokens: 256,
+        temperature: 0.1,
+        top_p: 0.1,
+      }),
+    });
+
+    if (!r.ok) return res.json({ completion: null });
+    const data = await r.json();
+    const completion = data.choices?.[0]?.message?.content ?? null;
+    return res.json({ completion });
+  } catch (err) {
+    return res.json({ completion: null, error: err.message });
   }
 });
 
