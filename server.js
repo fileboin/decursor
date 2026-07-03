@@ -730,9 +730,10 @@ app.post("/api/exec", async (req, res) => {
 // ── GitHub ──────────────────────────────────────────────────────────────────
 
 app.post("/api/github/pull", async (req, res) => {
-  const { token, repo, branch, path: filePath } = req.body;
+  const { token, owner, repo, branch, path: filePath } = req.body;
   try {
-    const url = `https://api.github.com/repos/${repo}/contents/${filePath}${
+    const fullRepo = owner ? `${owner}/${repo}` : repo;
+    const url = `https://api.github.com/repos/${fullRepo}/contents/${filePath}${
       branch ? `?ref=${branch}` : ""
     }`;
     const r = await fetch(url, {
@@ -751,10 +752,11 @@ app.post("/api/github/pull", async (req, res) => {
 });
 
 app.post("/api/github/push", async (req, res) => {
-  const { token, repo, branch, path: filePath, content, message, sha } =
+  const { token, owner, repo, branch, path: filePath, content, message, sha } =
     req.body;
   try {
-    const url = `https://api.github.com/repos/${repo}/contents/${filePath}`;
+    const fullRepo = owner ? `${owner}/${repo}` : repo;
+    const url = `https://api.github.com/repos/${fullRepo}/contents/${filePath}`;
     const body = {
       message: message || "Update via Decursor",
       content: Buffer.from(content).toString("base64"),
@@ -773,6 +775,29 @@ app.post("/api/github/push", async (req, res) => {
     const data = await r.json();
     if (!r.ok) throw new Error(data.message ?? "GitHub error");
     res.json({ ok: true, sha: data.content?.sha });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/github/tree", async (req, res) => {
+  const { token, owner, repo, branch } = req.body;
+  try {
+    const fullRepo = owner ? `${owner}/${repo}` : repo;
+    const ref = branch || "main";
+    const url = `https://api.github.com/repos/${fullRepo}/git/trees/${ref}?recursive=1`;
+    const r = await fetch(url, {
+      headers: {
+        Authorization: `token ${token}`,
+        Accept: "application/vnd.github.v3+json",
+      },
+    });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.message ?? "GitHub error");
+    const files = (data.tree || [])
+      .filter((item) => item.type === "blob")
+      .map((item) => item.path);
+    res.json({ files, truncated: !!data.truncated });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

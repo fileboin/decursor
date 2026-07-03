@@ -927,6 +927,8 @@ document.getElementById("new-file-btn").addEventListener("click", () => {
 const githubModal = document.getElementById("github-modal");
 const ghStatus = document.getElementById("gh-status");
 
+let ghFileTree = [];
+
 document.getElementById("github-btn").addEventListener("click", () => {
   // restore saved values
   document.getElementById("gh-token").value = localStorage.getItem("decursor_gh_token") || "";
@@ -934,6 +936,10 @@ document.getElementById("github-btn").addEventListener("click", () => {
   document.getElementById("gh-branch").value = localStorage.getItem("decursor_gh_branch") || "main";
   document.getElementById("gh-path").value = document.getElementById("filename-input").value || "";
   githubModal.classList.add("open");
+  // auto-load file tree if credentials are already saved
+  const savedToken = localStorage.getItem("decursor_gh_token");
+  const savedRepo = localStorage.getItem("decursor_gh_repo");
+  if (savedToken && savedRepo) githubLoadTree();
 });
 document.getElementById("gh-close-btn").addEventListener("click", () => {
   githubModal.classList.remove("open");
@@ -944,6 +950,76 @@ function saveGhSettings() {
   localStorage.setItem("decursor_gh_repo", document.getElementById("gh-repo").value);
   localStorage.setItem("decursor_gh_branch", document.getElementById("gh-branch").value);
 }
+
+async function githubLoadTree() {
+  const token = document.getElementById("gh-token").value.trim();
+  const repo = document.getElementById("gh-repo").value.trim();
+  const branch = document.getElementById("gh-branch").value.trim() || "main";
+
+  if (!token || !repo) {
+    ghStatus.textContent = "Popuni token i repo za učitavanje liste fajlova.";
+    return;
+  }
+
+  const parts = repo.split("/");
+  if (parts.length !== 2 || !parts[0] || !parts[1]) {
+    ghStatus.textContent = "Repo mora biti u formatu owner/repo";
+    return;
+  }
+  const [owner, repoName] = parts;
+
+  ghStatus.textContent = "Učitavam strukturu repoa...";
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/github/tree`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token, owner, repo: repoName, branch }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      ghStatus.textContent = `Greška: ${data.error || "nepoznata greška"}`;
+      return;
+    }
+
+    ghFileTree = data.files || [];
+    document.getElementById("gh-tree-search").value = "";
+    renderGhFileTree("");
+    document.getElementById("gh-file-tree-wrap").style.display = "flex";
+    ghStatus.textContent = data.truncated
+      ? `${ghFileTree.length}+ fajlova (lista skraćena)`
+      : `${ghFileTree.length} fajlova`;
+  } catch (err) {
+    ghStatus.textContent = `Greška konekcije: ${err.message}`;
+  }
+}
+
+function renderGhFileTree(filter) {
+  const list = document.getElementById("gh-file-list");
+  const query = (filter || "").toLowerCase();
+  const filtered = query
+    ? ghFileTree.filter((p) => p.toLowerCase().includes(query))
+    : ghFileTree;
+  list.innerHTML = filtered
+    .map((p) => {
+      const esc = p.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;");
+      return `<div class="gh-file-item" data-path="${esc}" title="${esc}">${esc}</div>`;
+    })
+    .join("");
+}
+
+document.getElementById("gh-tree-search").addEventListener("input", (e) => {
+  renderGhFileTree(e.target.value);
+});
+
+document.getElementById("gh-file-list").addEventListener("click", (e) => {
+  const item = e.target.closest(".gh-file-item");
+  if (!item) return;
+  document.getElementById("gh-path").value = item.dataset.path;
+  githubPull();
+});
+
+document.getElementById("gh-load-tree-btn").addEventListener("click", githubLoadTree);
 
 async function githubPull() {
   saveGhSettings();

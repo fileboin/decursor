@@ -849,6 +849,45 @@
     margin-top: 8px;
     flex-wrap: wrap;
   }
+  #gh-load-tree-btn {
+    font-size: 12px;
+    padding: 5px 10px;
+    align-self: flex-start;
+  }
+  #gh-file-tree-wrap {
+    display: none;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+  #gh-tree-search {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    font-size: 12px;
+    background: var(--panel);
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    outline: none;
+  }
+  #gh-file-list {
+    overflow-y: auto;
+    max-height: 180px;
+  }
+  .gh-file-item {
+    padding: 6px 10px;
+    font-size: 12px;
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-family: monospace;
+  }
+  .gh-file-item:hover { background: var(--accent); color: #fff; }
+  .gh-file-item:last-child { border-bottom: none; }
 
   /* ── Terminal panel ── */
   #terminal-pane {
@@ -1701,6 +1740,13 @@
 
     <label>Grana</label>
     <input id="gh-branch" placeholder="main" value="main" />
+
+    <button class="secondary" id="gh-load-tree-btn">Prikaži fajlove u repou</button>
+
+    <div id="gh-file-tree-wrap">
+      <input id="gh-tree-search" type="text" placeholder="Pretraži fajlove..." autocomplete="off" />
+      <div id="gh-file-list"></div>
+    </div>
 
     <label>Putanja fajla u repou</label>
     <input id="gh-path" placeholder="index.html" />
