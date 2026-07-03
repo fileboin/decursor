@@ -41,6 +41,11 @@ require(["vs/editor/editor.main"], function () {
   });
 
   document.getElementById("filename-input").addEventListener("input", updateLanguageFromFilename);
+
+  // Activate Monacopilot inline completions if the toggle was saved as enabled
+  if (localStorage.getItem("decursor-monacopilot") !== "0") {
+    toggleAICompletion(true);
+  }
 });
 
 function updateLanguageFromFilename() {
@@ -1489,24 +1494,29 @@ document.getElementById("pay-modal").addEventListener("click", (e) => {
 
 // ---------- Monacopilot / AI inline completion ----------
 
-let monacopilotDisposable = null; // holds the registered Monaco inline completion provider
+let monacopilotRegistration = null; // { deregister: () => void } returned by monacopilot.registerCompletion
 
 /**
- * Enable or disable inline AI completion (Monacopilot).
- * Persists state to localStorage; registers or disposes the Monaco provider.
+ * Enable or disable inline AI completion via Monacopilot.
+ * Persists state to localStorage; registers or deregisters the Monaco provider.
+ * Safe to call before Monaco finishes loading — a guard checks for editor readiness.
  * @param {boolean} enabled
  */
 function toggleAICompletion(enabled) {
   localStorage.setItem("decursor-monacopilot", enabled ? "1" : "0");
 
   if (enabled) {
-    // Placeholder: register Monaco inline completion provider here.
-    // Example: monacopilotDisposable = monaco.languages.registerInlineCompletionsProvider('*', provider);
+    if (!editor || typeof monacopilot === "undefined") return; // Monaco not ready yet; called again after load
+    if (monacopilotRegistration) return; // already active
+    monacopilotRegistration = monacopilot.registerCompletion(monaco, editor, {
+      endpoint: `${BACKEND_BASE}/api/complete`,
+      trigger: "onTyping",
+    });
     console.info("[Monacopilot] AI inline completion ENABLED");
   } else {
-    if (monacopilotDisposable) {
-      monacopilotDisposable.dispose();
-      monacopilotDisposable = null;
+    if (monacopilotRegistration) {
+      monacopilotRegistration.deregister();
+      monacopilotRegistration = null;
     }
     console.info("[Monacopilot] AI inline completion DISABLED");
   }
@@ -1700,7 +1710,7 @@ function buildMcpServerItem(server) {
 // ── Add MCP Server form ──────────────────────────────────────────────────────
 
 function openMcpAddForm() {
-  // Reset form fields
+  homeDropdown.classList.add("hidden");
   document.getElementById("mcp-add-name").value = "";
   document.getElementById("mcp-add-command").value = "";
   document.getElementById("mcp-add-url").value = "";
