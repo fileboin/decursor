@@ -128,6 +128,228 @@ app.get("/monacopilot.js", (_req, res) =>
   res.sendFile(path.join(__dirname, "node_modules/monacopilot/dist/index.global.js"))
 );
 
+// ── Health & status helpers ───────────────────────────────────────────────────
+
+function formatUptime(totalSeconds) {
+  const s = Math.floor(totalSeconds);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h ${m}m`;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${sec}s`;
+  return `${sec}s`;
+}
+
+async function getGitHash() {
+  try {
+    const { stdout } = await execAsync("git rev-parse --short HEAD", {
+      cwd: __dirname,
+      timeout: 3_000,
+    });
+    return stdout.trim();
+  } catch {
+    return null;
+  }
+}
+
+/** Attempts a quick SELECT 1 against each configured Postgres URL. */
+async function checkPostgresConnections() {
+  const entries = [];
+  if (process.env.DATABASE_URL) {
+    entries.push({ id: "postgres", name: "Postgres", url: process.env.DATABASE_URL });
+  }
+  for (let i = 2; i <= 9; i++) {
+    const url = process.env[`POSTGRES_${i}_URL`];
+    if (!url) continue;
+    const name = process.env[`POSTGRES_${i}_NAME`] || `Postgres ${i}`;
+    entries.push({ id: `postgres-${i}`, name, url });
+  }
+  if (entries.length === 0) return [];
+
+  let PgClient;
+  try {
+    const pgMod = await import("pg");
+    PgClient = (pgMod.default ?? pgMod).Client;
+  } catch {
+    return entries.map(({ id, name }) => ({
+      id,
+      name,
+      ok: false,
+      error: "pg module unavailable",
+    }));
+  }
+
+  return Promise.all(
+    entries.map(async ({ id, name, url }) => {
+      const client = new PgClient({
+        connectionString: url,
+        connectionTimeoutMillis: 3_000,
+      });
+      try {
+        await client.connect();
+        await client.query("SELECT 1");
+        await client.end();
+        return { id, name, ok: true };
+      } catch (err) {
+        await client.end().catch(() => {});
+        return { id, name, ok: false, error: err.message };
+      }
+    })
+  );
+}
+
+async function gatherSystemStatus() {
+  const [version, postgres] = await Promise.all([
+    getGitHash(),
+    checkPostgresConnections(),
+  ]);
+  return {
+    timestamp: new Date().toISOString(),
+    uptime: Math.floor(process.uptime()),
+    version,
+    config: {
+      openrouter: !!OPENROUTER_KEY,
+      auth: !!ACCESS_KEY,
+    },
+    postgres,
+    mcp: getAllServersStatus(),
+  };
+}
+
+function renderStatusHtml(s) {
+  const esc = (v) =>
+    String(v ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+
+  function mcpDot(srv) {
+    if (!srv.enabled) return "gray";
+    if (srv.status === "connected") return "green";
+    if (srv.status === "error") return "red";
+    if (srv.status === "not_configured") return "gray";
+    return "yellow"; // disconnected / connecting / idle
+  }
+
+  const pgBlock =
+    s.postgres.length === 0
+      ? ""
+      : `<div class="section">
+        <div class="section-title">Postgres</div>
+        ${s.postgres
+          .map(
+            (p) =>
+              `<div class="row">
+            <span class="dot ${p.ok ? "green" : "red"}"></span>
+            <span class="label">${esc(p.name)}</span>
+            <span class="badge">${p.ok ? "connected" : "error"}</span>
+          </div>${p.error ? `<div class="error-msg">${esc(p.error)}</div>` : ""}`
+          )
+          .join("")}
+      </div>`;
+
+  const connectedCount = s.mcp.filter((m) => m.status === "connected").length;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Decursor Status</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a; color: #e2e8f0; min-height: 100vh;
+      padding: 20px 16px 48px; max-width: 600px; margin: 0 auto;
+    }
+    h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.02em; }
+    .meta { color: #64748b; font-size: 0.8rem; margin: 5px 0 24px; line-height: 1.6; }
+    .meta code {
+      font-size: 0.8rem; color: #94a3b8; background: #1e293b;
+      padding: 1px 5px; border-radius: 4px;
+    }
+    .section { background: #1e293b; border-radius: 12px; padding: 14px 16px; margin-bottom: 14px; }
+    .section-title {
+      font-size: 0.6875rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: #475569; margin-bottom: 10px;
+    }
+    .row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.04);
+    }
+    .row:last-of-type { border-bottom: none; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .dot.green  { background: #22c55e; box-shadow: 0 0 7px #22c55e88; }
+    .dot.red    { background: #ef4444; box-shadow: 0 0 7px #ef444488; }
+    .dot.yellow { background: #f59e0b; box-shadow: 0 0 7px #f59e0b88; }
+    .dot.gray   { background: #475569; }
+    .label { flex: 1; font-size: 0.875rem; }
+    .badge { font-size: 0.75rem; color: #64748b; white-space: nowrap; }
+    .error-msg { font-size: 0.75rem; color: #f87171; padding: 2px 0 5px 19px; }
+  </style>
+</head>
+<body>
+  <h1>Decursor</h1>
+  <div class="meta">
+    ${esc(s.timestamp)}<br>
+    uptime: ${esc(formatUptime(s.uptime))}${
+      s.version
+        ? ` &nbsp;&middot;&nbsp; commit: <code>${esc(s.version)}</code>`
+        : ""
+    }
+  </div>
+
+  <div class="section">
+    <div class="section-title">Configuration</div>
+    <div class="row">
+      <span class="dot ${s.config.openrouter ? "green" : "red"}"></span>
+      <span class="label">OpenRouter API Key</span>
+      <span class="badge">${s.config.openrouter ? "configured" : "not set"}</span>
+    </div>
+    <div class="row">
+      <span class="dot ${s.config.auth ? "green" : "yellow"}"></span>
+      <span class="label">Access Key (auth)</span>
+      <span class="badge">${s.config.auth ? "enabled" : "disabled"}</span>
+    </div>
+  </div>
+
+  ${pgBlock}
+
+  <div class="section">
+    <div class="section-title">MCP Servers (${connectedCount}/${s.mcp.length} connected)</div>
+    ${s.mcp
+      .map(
+        (srv) =>
+          `<div class="row">
+        <span class="dot ${mcpDot(srv)}"></span>
+        <span class="label">${srv.icon ? esc(srv.icon) + " " : ""}${esc(srv.name)}</span>
+        <span class="badge">${esc(srv.enabled ? srv.status : "disabled")}</span>
+      </div>`
+      )
+      .join("")}
+  </div>
+</body>
+</html>`;
+}
+
+// ── Health & status endpoints (no auth, no rate-limit) ───────────────────────
+
+app.get("/health", (_req, res) => {
+  res.json({ status: "ok", uptime: Math.floor(process.uptime()) });
+});
+
+app.get("/status", async (_req, res) => {
+  try {
+    const s = await gatherSystemStatus();
+    res.type("text/html").send(renderStatusHtml(s));
+  } catch (err) {
+    res.status(500).type("text/plain").send(`Error: ${err.message}`);
+  }
+});
+
 app.use(
   "/api/",
   rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false })
@@ -874,6 +1096,15 @@ app.post("/api/wordpress/publish", async (req, res) => {
 
 app.get("/api/mcp/servers", (req, res) => {
   res.json(getAllServersStatus());
+});
+
+app.get("/api/status", async (_req, res) => {
+  try {
+    const s = await gatherSystemStatus();
+    res.json({ status: "ok", ...s });
+  } catch (err) {
+    res.status(500).json({ status: "error", error: err.message });
+  }
 });
 
 app.post("/api/mcp/servers/:id/toggle", async (req, res) => {
