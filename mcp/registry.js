@@ -33,6 +33,12 @@ const IDLE_MS = 5 * 60 * 1000; // 5 minutes
  */
 export const EXEC_TOOLS = new Set(["run_command"]);
 
+/**
+ * Tool names handled by the fetch/HTTP virtual client.
+ * Intercepted by server.js before routeToolCall().
+ */
+export const FETCH_TOOLS = new Set(["http_request"]);
+
 // ── Registry singleton ───────────────────────────────────────────────────────
 
 /** @type {LazyMCPClient[]} */
@@ -153,13 +159,16 @@ export async function initRegistry(env, workspaceDir) {
     },
   });
 
+  // ── Fetch/HTTP — virtual client, no child process ────────────────────────
+  const fetchServer = new VirtualFetchClient();
+
   // ── Terminal — virtual client, no child process ───────────────────────────
   const terminalServer = new VirtualTerminalClient();
 
   // ── Postgres — one server per DATABASE_URL / POSTGRES_n_URL ─────────────
   const postgresServers = buildPostgresServers(env);
 
-  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, terminalServer];
+  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, fetchServer, terminalServer];
 
   // Combine all for public access
   _allServers = [filesystemProxy, ...lazyServers];
@@ -167,6 +176,107 @@ export async function initRegistry(env, workspaceDir) {
 
 /** All servers (filesystem proxy + lazy servers). Set after initRegistry(). */
 let _allServers = [];
+
+// ── VirtualFetchClient — HTTP client, no child process ──────────────────────
+
+const FETCH_IDLE_MS = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Provides the http_request tool without spawning any process.
+ * Actual HTTP calls are handled by server.js (domain check, timeout, audit).
+ * Status transitions: disconnected → connected (on first call) → disconnected
+ * (after FETCH_IDLE_MS idle). The tools are always available to the model
+ * regardless of idle state (connected getter always returns true).
+ */
+class VirtualFetchClient {
+  constructor() {
+    this.id          = "fetch";
+    this.name        = "Fetch/HTTP";
+    this.icon        = "🌐";
+    this.description = "HTTP pozivi ka eksternim API-jima i web servisima";
+    this.enabled     = true;
+    this.notConfigured = false;
+    this.type        = "fetch";
+    this._status     = "disconnected"; // display only
+    this._idleTimer  = null;
+
+    this.tools = [
+      {
+        name: "http_request",
+        description:
+          "Make an HTTP request to an external URL. " +
+          "Supports GET, POST, PUT, DELETE, PATCH. " +
+          "Responses are capped at a configurable size limit to protect the context window. " +
+          "Requires explicit URL and method; headers and body are optional.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            method: {
+              type: "string",
+              enum: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+              description: "HTTP method",
+            },
+            url: {
+              type: "string",
+              description: "Full URL to request",
+            },
+            headers: {
+              type: "object",
+              description: "HTTP headers (key→value). Include Authorization here for bearer tokens.",
+              additionalProperties: { type: "string" },
+            },
+            body: {
+              type: "string",
+              description: "Request body (for POST/PUT/PATCH). Use JSON string if sending JSON.",
+            },
+            timeout: {
+              type: "number",
+              description: "Timeout in milliseconds (default 15000, max 30000)",
+            },
+          },
+          required: ["method", "url"],
+        },
+      },
+    ];
+  }
+
+  /** Always true so tools appear in every LLM request. */
+  get connected() { return true; }
+  get status()    { return this._status; }
+
+  async connect()    { /* no-op */ }
+
+  async disconnect() {
+    this._clearIdleTimer();
+    this._status = "disconnected";
+  }
+
+  /** Called by server.js after each successful HTTP call. */
+  markActive() {
+    this._status = "connected";
+    this._clearIdleTimer();
+    this._idleTimer = setTimeout(() => {
+      this._status = "disconnected";
+      this._idleTimer = null;
+    }, FETCH_IDLE_MS);
+    if (this._idleTimer.unref) this._idleTimer.unref();
+  }
+
+  _clearIdleTimer() {
+    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null; }
+  }
+
+  getOpenAITools() {
+    return this.tools.map((t) => ({
+      type: "function",
+      function: { name: t.name, description: t.description, parameters: t.inputSchema },
+    }));
+  }
+
+  async callTool() {
+    throw new Error("Fetch tool calls must be intercepted by server.js before reaching callTool()");
+  }
+}
 
 // ── VirtualTerminalClient — no child process, always ready ──────────────────
 
@@ -326,7 +436,10 @@ export function getAllServersStatus() {
     }
     if (s.type === "terminal") {
       base.type = "terminal";
-      base.confirmRequired = true; // always, non-negotiable
+      base.confirmRequired = true;
+    }
+    if (s.type === "fetch") {
+      base.type = "fetch";
     }
     return base;
   });
@@ -405,6 +518,15 @@ export async function getToolsForChat() {
   }
 
   return tools;
+}
+
+/**
+ * Notify the registry that a virtual server (fetch/terminal) was just used.
+ * Resets its idle timer and marks status as "connected".
+ */
+export function notifyServerActivity(id) {
+  const s = _allServers.find((srv) => srv.id === id);
+  if (s && typeof s.markActive === "function") s.markActive();
 }
 
 /**
