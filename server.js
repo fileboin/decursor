@@ -2,7 +2,7 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import { readdir, readFile, writeFile } from "fs/promises";
+import { readdir, readFile, writeFile, appendFile, mkdir } from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
@@ -18,6 +18,7 @@ import {
   routeToolCall,
   resultToText,
   POSTGRES_WRITE_TOOLS,
+  EXEC_TOOLS,
 } from "./mcp/registry.js";
 
 const execAsync = promisify(exec);
@@ -34,6 +35,21 @@ const WORKSPACE_DIR = path.resolve(
 );
 
 
+// ── Audit log ────────────────────────────────────────────────────────────────
+const AUDIT_LOG_PATH = path.join(
+  process.env.EXEC_AUDIT_LOG
+    ? path.dirname(process.env.EXEC_AUDIT_LOG)
+    : path.join(process.cwd(), "logs"),
+  process.env.EXEC_AUDIT_LOG
+    ? path.basename(process.env.EXEC_AUDIT_LOG)
+    : "exec-audit.log"
+);
+
+async function writeAuditLog(tag, detail) {
+  const line = `[${new Date().toISOString()}] ${tag.padEnd(10)} ${detail}\n`;
+  await appendFile(AUDIT_LOG_PATH, line).catch(() => {}); // best-effort
+}
+
 // ── Postgres write-confirmation state ───────────────────────────────────────
 // Map of confirmId → {resolve, reject} — populated during SSE streams
 const pendingWriteConfirms = new Map();
@@ -45,6 +61,22 @@ function waitForWriteConfirm(id, timeoutMs = 120_000) {
       reject(new Error("Write confirmation timed out"));
     }, timeoutMs);
     pendingWriteConfirms.set(id, {
+      allow: () => { clearTimeout(timer); resolve(); },
+      deny:  () => { clearTimeout(timer); reject(new Error("User denied")); },
+    });
+  });
+}
+
+// ── Exec confirmation state ──────────────────────────────────────────────────
+const pendingExecConfirms = new Map();
+
+function waitForExecConfirm(id, timeoutMs = 120_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingExecConfirms.delete(id);
+      reject(new Error("Confirmation timed out (2 min)"));
+    }, timeoutMs);
+    pendingExecConfirms.set(id, {
       allow: () => { clearTimeout(timer); resolve(); },
       deny:  () => { clearTimeout(timer); reject(new Error("User denied")); },
     });
@@ -334,7 +366,41 @@ app.post("/api/chat/stream", async (req, res) => {
           tool_call: { id: tc.id, name: tc.function.name, arguments: args },
         });
 
-        // For Postgres write tools: ask user confirmation before executing
+        // ── EXEC TOOLS: confirm → execute → audit (bypass routeToolCall) ──
+        if (EXEC_TOOLS.has(tc.function.name)) {
+          const { command, timeout: cmdTimeout = 30_000 } = args;
+          const confirmId = randomUUID();
+          await writeAuditLog("PROPOSED", `${tc.function.name} via MCP : ${command}`);
+          sseWrite(res, { exec_confirm: { id: confirmId, command } });
+
+          let execResult;
+          try {
+            await waitForExecConfirm(confirmId);
+            await writeAuditLog("ALLOWED", `${tc.function.name} via MCP : ${command}`);
+            const { stdout, stderr } = await execAsync(command, {
+              cwd: WORKSPACE_DIR,
+              timeout: Math.min(Number(cmdTimeout) || 30_000, 60_000),
+            });
+            await writeAuditLog("OUTPUT", `stdout:${stdout.slice(0, 300)}, stderr:${stderr.slice(0, 300)}`);
+            execResult = {
+              content: [{ type: "text", text: `STDOUT:\n${stdout}\nSTDERR:\n${stderr}` }],
+            };
+          } catch (err) {
+            const tag = err.message.includes("denied")
+              ? "DENIED"
+              : err.message.includes("timed out")
+              ? "TIMEOUT"
+              : "EXEC_ERR";
+            await writeAuditLog(tag, `${tc.function.name} via MCP : ${command} — ${err.message}`);
+            execResult = { isError: true, content: [{ type: "text", text: err.message }] };
+          }
+
+          sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: execResult } });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(execResult) });
+          continue; // ← skip routeToolCall below
+        }
+
+        // ── For Postgres write tools: ask user confirmation before executing ──
         if (POSTGRES_WRITE_TOOLS.has(tc.function.name)) {
           const confirmId = randomUUID();
           sseWrite(res, {
@@ -402,13 +468,18 @@ app.post("/api/chat/stream", async (req, res) => {
 app.post("/api/exec", async (req, res) => {
   const { command } = req.body;
   if (!command) return res.status(400).json({ error: "No command provided" });
+  // Confirmation happens in the frontend before this endpoint is called.
+  // We audit-log every execution for traceability.
+  await writeAuditLog("ALLOWED", `/api/exec via terminal : ${command}`);
   try {
     const { stdout, stderr } = await execAsync(command, {
       cwd: WORKSPACE_DIR,
       timeout: 30_000,
     });
+    await writeAuditLog("OUTPUT", `stdout:${stdout.slice(0, 300)}, stderr:${stderr.slice(0, 300)}`);
     res.json({ stdout, stderr });
   } catch (err) {
+    await writeAuditLog("EXEC_ERR", `/api/exec : ${command} — ${err.message}`);
     res.json({ stdout: "", stderr: err.message, code: err.code });
   }
 });
@@ -538,6 +609,15 @@ app.post("/api/mcp/servers/:id/toggle", async (req, res) => {
   res.json(result);
 });
 
+// Resolve or deny a pending exec (terminal MCP) confirmation
+app.post("/api/mcp/exec-confirm/:id", (req, res) => {
+  const pending = pendingExecConfirms.get(req.params.id);
+  if (!pending) return res.status(404).json({ error: "Confirmation not found or expired" });
+  pendingExecConfirms.delete(req.params.id);
+  req.body.allowed ? pending.allow() : pending.deny();
+  res.json({ ok: true });
+});
+
 // Resolve or deny a pending Postgres write confirmation
 app.post("/api/mcp/write-confirm/:id", (req, res) => {
   const pending = pendingWriteConfirms.get(req.params.id);
@@ -559,6 +639,10 @@ app.post("/api/mcp/servers/:id/write-mode", async (req, res) => {
 app.listen(PORT, async () => {
   console.log(`Decursor listening on port ${PORT}`);
   console.log(`Workspace: ${WORKSPACE_DIR}`);
+
+  // Ensure logs/ directory exists for audit log
+  await mkdir(path.dirname(AUDIT_LOG_PATH), { recursive: true }).catch(() => {});
+  console.log(`Exec audit log: ${AUDIT_LOG_PATH}`);
 
   // 1. Connect filesystem MCP server (eager, permanent)
   try {

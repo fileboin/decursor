@@ -25,6 +25,14 @@ export { resultToText };
 
 const IDLE_MS = 5 * 60 * 1000; // 5 minutes
 
+// ── Terminal tools — intercepted by server.js BEFORE routeToolCall ───────────
+
+/**
+ * Tool names that require explicit user confirmation + audit logging.
+ * This is a constant — there is no runtime path that can disable this check.
+ */
+export const EXEC_TOOLS = new Set(["run_command"]);
+
 // ── Registry singleton ───────────────────────────────────────────────────────
 
 /** @type {LazyMCPClient[]} */
@@ -145,10 +153,13 @@ export async function initRegistry(env, workspaceDir) {
     },
   });
 
+  // ── Terminal — virtual client, no child process ───────────────────────────
+  const terminalServer = new VirtualTerminalClient();
+
   // ── Postgres — one server per DATABASE_URL / POSTGRES_n_URL ─────────────
   const postgresServers = buildPostgresServers(env);
 
-  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers];
+  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, terminalServer];
 
   // Combine all for public access
   _allServers = [filesystemProxy, ...lazyServers];
@@ -156,6 +167,75 @@ export async function initRegistry(env, workspaceDir) {
 
 /** All servers (filesystem proxy + lazy servers). Set after initRegistry(). */
 let _allServers = [];
+
+// ── VirtualTerminalClient — no child process, always ready ──────────────────
+
+/**
+ * Provides the run_command tool definition without spawning any process.
+ * Actual execution is handled by server.js AFTER user confirmation.
+ * confirmRequired is hardcoded true — it cannot be toggled via any API.
+ */
+class VirtualTerminalClient {
+  constructor() {
+    this.id          = "terminal";
+    this.name        = "Terminal";
+    this.icon        = "⌨️";
+    this.description = "Izvršava shell komande u workspace-u";
+    this.enabled     = true;
+    this.notConfigured = false;
+    this.type        = "terminal";
+    /** Non-negotiable — never set to false. */
+    this.confirmRequired = true;
+    this.tools = [
+      {
+        name: "run_command",
+        description:
+          "Execute a shell command in the server workspace directory. " +
+          "ALWAYS requires explicit user confirmation before execution — " +
+          "no command is ever auto-executed.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            command: {
+              type: "string",
+              description: "The shell command to execute",
+            },
+            timeout: {
+              type: "number",
+              description: "Timeout in milliseconds (default 30000, max 60000)",
+            },
+          },
+          required: ["command"],
+        },
+      },
+    ];
+  }
+
+  get status()    { return "connected"; }
+  get connected() { return true; }
+
+  async connect()    { /* no-op — no child process to spawn */ }
+  async disconnect() { /* no-op */ }
+
+  getOpenAITools() {
+    return this.tools.map((t) => ({
+      type: "function",
+      function: {
+        name: t.name,
+        description: t.description,
+        parameters: t.inputSchema,
+      },
+    }));
+  }
+
+  async callTool() {
+    // server.js intercepts EXEC_TOOLS before routeToolCall is called.
+    // This method should never be reached.
+    throw new Error(
+      "Terminal tool calls must be intercepted by server.js before reaching callTool()"
+    );
+  }
+}
 
 // ── Postgres helpers ─────────────────────────────────────────────────────────
 
@@ -242,8 +322,11 @@ export function getAllServersStatus() {
     if (s.type === "postgres") {
       base.type = "postgres";
       base.writeMode = s._writeMode === true;
-      // Update description to reflect current mode
       base.description = `${new URL(s._pgUrl).hostname} · ${s._writeMode ? "write" : "read-only"}`;
+    }
+    if (s.type === "terminal") {
+      base.type = "terminal";
+      base.confirmRequired = true; // always, non-negotiable
     }
     return base;
   });
@@ -276,9 +359,10 @@ export async function toggleServer(id) {
     return { id: s.id, enabled: false, status: "not_configured" };
   }
 
-  if (id === "filesystem") {
-    // Filesystem is always on; toggling is a no-op
-    return { id: "filesystem", enabled: true, status: s.status };
+  if (id === "filesystem" || id === "terminal") {
+    // These servers are always on; toggling is a no-op
+    return { id: s.id, enabled: true, status: s.status,
+             ...(id === "terminal" ? { confirmRequired: true } : {}) };
   }
 
   s.enabled = !s.enabled;
