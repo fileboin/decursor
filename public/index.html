@@ -1424,6 +1424,21 @@
   }
   #pg-write-allow-btn:hover { background: #3a1010; color: var(--diff-removed-fg); }
 
+  /* Confirm-required badge (terminal row, non-toggleable indicator) */
+  .mcp-confirm-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 600;
+    white-space: nowrap;
+    flex-shrink: 0;
+    background: var(--diff-removed-bg);
+    color: var(--diff-removed-fg);
+    border: 1px solid #6a2020;
+    cursor: default;
+    user-select: none;
+  }
+
   /* Write-mode badge inside Manage MCP panel (postgres rows) */
   .mcp-write-badge {
     font-size: 10px;

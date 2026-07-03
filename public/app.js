@@ -862,6 +862,9 @@ async function sendChat() {
             if (parsed.write_confirm) {
               showPgWriteConfirm(parsed.write_confirm);
             }
+            if (parsed.exec_confirm) {
+              showMcpExecConfirm(parsed.exec_confirm);
+            }
             if (parsed.error) {
               fullText = fullText
                 ? fullText + `\n\n[Greška: ${parsed.error}]`
@@ -1125,7 +1128,9 @@ termCmdInput.addEventListener("keydown", async (e) => {
     }
     terminalHistoryIdx = -1;
     terminalDraftCmd = "";
-    await runInTerminal(command);
+    // Always confirm before executing — even when user types directly
+    const confirmed = await showExecConfirmModal(command);
+    if (confirmed) await runInTerminal(command);
   } else if (e.key === "ArrowUp") {
     e.preventDefault();
     if (!terminalCmdHistory.length) return;
@@ -1587,16 +1592,22 @@ function buildMcpServerItem(server) {
        </span>`
     : "";
 
+  // Non-toggleable "⚠️ Confirm Required" badge for terminal server
+  const confirmBadgeHtml = server.type === "terminal"
+    ? `<span class="mcp-confirm-badge" title="Svaka komanda zahtijeva eksplicitnu potvrdu korisnika — ovo se ne može isključiti">⚠️ Confirm Required</span>`
+    : "";
+
   item.innerHTML = `
     <span class="mcp-server-icon">${server.icon}</span>
     <div class="mcp-server-meta">
       <div class="mcp-server-name">${server.name}</div>
       <div class="mcp-server-desc">${server.description}</div>
     </div>
+    ${confirmBadgeHtml}
     ${writeBadgeHtml}
     <span class="mcp-status-badge mcp-status-${server.status}">${MCP_STATUS_LABEL[server.status] ?? server.status}</span>
-    <label class="dd-toggle-switch" title="${server.enabled ? "Isključi" : "Uključi"}">
-      <input type="checkbox" ${server.enabled ? "checked" : ""}/>
+    <label class="dd-toggle-switch" title="${server.type === "terminal" ? "Terminal server se ne može isključiti" : server.enabled ? "Isključi" : "Uključi"}">
+      <input type="checkbox" ${server.enabled ? "checked" : ""} ${server.type === "terminal" ? "disabled" : ""}/>
       <span class="dd-toggle-track"></span>
     </label>
   `;
@@ -1684,7 +1695,6 @@ async function sendWriteConfirm(id, allowed) {
 
 function showPgWriteConfirm({ id, tool, arguments: args }) {
   _pgConfirmId = id;
-  // Format a readable SQL/operation preview
   let preview = `Tool: ${tool}\n\n`;
   if (args.sql) {
     preview += args.sql;
@@ -1696,6 +1706,59 @@ function showPgWriteConfirm({ id, tool, arguments: args }) {
     `⚠️ Model želi da izvrši "${tool}" na Postgres bazi. Pregledaj i potvrdi.`;
   statusEl.textContent = "⚠️ Write potvrda potrebna…";
   pgWriteModal.classList.add("open");
+}
+
+// ── MCP exec (terminal) confirmation ─────────────────────────────────────────
+
+let _mcpExecConfirmId = null;
+
+function showMcpExecConfirm({ id, command }) {
+  _mcpExecConfirmId = id;
+  // Reuse the existing #exec-confirm-modal by temporarily overriding its buttons
+  const modal   = document.getElementById("exec-confirm-modal");
+  const cmdEl   = document.getElementById("exec-confirm-cmd");
+  const allowBtn = document.getElementById("exec-accept-btn");
+  const denyBtn  = document.getElementById("exec-reject-btn");
+
+  cmdEl.textContent = command;
+  statusEl.textContent = "⚠️ Potvrda AI komande potrebna…";
+  modal.classList.add("open");
+
+  function cleanup() {
+    modal.classList.remove("open");
+    allowBtn.removeEventListener("click", onAllow);
+    denyBtn.removeEventListener("click",  onDeny);
+    modal.removeEventListener("click",    onBackdrop);
+    statusEl.textContent = "";
+  }
+  async function onAllow() {
+    cleanup();
+    await sendMcpExecConfirm(_mcpExecConfirmId, true);
+    _mcpExecConfirmId = null;
+  }
+  async function onDeny() {
+    cleanup();
+    await sendMcpExecConfirm(_mcpExecConfirmId, false);
+    _mcpExecConfirmId = null;
+  }
+  function onBackdrop(e) {
+    if (e.target === modal) onDeny();
+  }
+
+  allowBtn.addEventListener("click", onAllow);
+  denyBtn.addEventListener("click",  onDeny);
+  modal.addEventListener("click",    onBackdrop);
+}
+
+async function sendMcpExecConfirm(id, allowed) {
+  if (!id) return;
+  try {
+    await apiFetch(`${BACKEND_BASE}/api/mcp/exec-confirm/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed }),
+    });
+  } catch (_) { /* server handles timeout */ }
 }
 
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
