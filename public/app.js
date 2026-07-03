@@ -1932,7 +1932,7 @@ function toggleAICompletion(enabled) {
     if (monacopilotRegistration) return; // already active
     monacopilotRegistration = monacopilot.registerCompletion(monaco, editor, {
       endpoint: `${BACKEND_BASE}/api/complete`,
-      trigger: "onTyping",
+      trigger: "onIdle",
     });
     console.info("[Monacopilot] AI inline completion ENABLED");
   } else {
