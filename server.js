@@ -21,6 +21,8 @@ import {
   POSTGRES_WRITE_TOOLS,
   EXEC_TOOLS,
   FETCH_TOOLS,
+  TELEGRAM_TOOLS,
+  TELEGRAM_WRITE_TOOLS,
 } from "./mcp/registry.js";
 
 const execAsync = promisify(exec);
@@ -36,6 +38,10 @@ const WORKSPACE_DIR = path.resolve(
   process.env.MCP_WORKSPACE_DIR || process.cwd()
 );
 
+
+// ── Telegram config ──────────────────────────────────────────────────────────
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
 // ── HTTP fetch config ────────────────────────────────────────────────────────
 
@@ -489,6 +495,72 @@ app.post("/api/chat/stream", async (req, res) => {
 
           sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: fetchResult } });
           messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(fetchResult) });
+          continue; // skip routeToolCall
+        }
+
+        // ── TELEGRAM TOOLS: optional confirm (write) → Bot API → audit ────────
+        if (TELEGRAM_TOOLS.has(tc.function.name)) {
+          // send_message requires confirmation; read tools execute directly
+          if (TELEGRAM_WRITE_TOOLS.has(tc.function.name)) {
+            const confirmId = randomUUID();
+            sseWrite(res, { write_confirm: { id: confirmId, tool: tc.function.name, arguments: args } });
+            try {
+              await waitForWriteConfirm(confirmId);
+            } catch (err) {
+              await writeAuditLog("TG_DENY", `${tc.function.name} — ${err.message}`);
+              const denied = { isError: true, content: [{ type: "text", text: err.message }] };
+              sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: denied } });
+              messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(denied) });
+              continue;
+            }
+          }
+
+          let tgResult;
+          try {
+            const name = tc.function.name;
+            let resp, data;
+
+            if (name === "telegram_send_message") {
+              const { chat_id, text, parse_mode } = args;
+              const body = { chat_id, text };
+              if (parse_mode) body.parse_mode = parse_mode;
+              resp = await fetch(`${TELEGRAM_API}/sendMessage`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(15_000),
+              });
+              data = await resp.json();
+              if (!data.ok) throw new Error(`Telegram: ${data.description}`);
+              await writeAuditLog("TG_CALL", `sendMessage → chat_id:${chat_id}`);
+              tgResult = { content: [{ type: "text", text: `Sent. message_id: ${data.result.message_id}` }] };
+
+            } else if (name === "telegram_get_webhook_info") {
+              resp = await fetch(`${TELEGRAM_API}/getWebhookInfo`, { signal: AbortSignal.timeout(15_000) });
+              data = await resp.json();
+              if (!data.ok) throw new Error(`Telegram: ${data.description}`);
+              await writeAuditLog("TG_CALL", `getWebhookInfo`);
+              tgResult = { content: [{ type: "text", text: JSON.stringify(data.result, null, 2) }] };
+
+            } else if (name === "telegram_get_updates") {
+              const { limit = 10, offset } = args;
+              const params = new URLSearchParams({ limit: String(Math.min(Number(limit) || 10, 100)) });
+              if (offset !== undefined) params.set("offset", String(offset));
+              resp = await fetch(`${TELEGRAM_API}/getUpdates?${params}`, { signal: AbortSignal.timeout(15_000) });
+              data = await resp.json();
+              if (!data.ok) throw new Error(`Telegram: ${data.description}`);
+              await writeAuditLog("TG_CALL", `getUpdates (${data.result?.length ?? 0} updates)`);
+              tgResult = { content: [{ type: "text", text: JSON.stringify(data.result, null, 2) }] };
+            }
+
+            notifyServerActivity("telegram");
+          } catch (err) {
+            await writeAuditLog("TG_ERR", `${tc.function.name} — ${err.message}`);
+            tgResult = { isError: true, content: [{ type: "text", text: err.message }] };
+          }
+
+          sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: tgResult } });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(tgResult) });
           continue; // skip routeToolCall
         }
 

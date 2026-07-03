@@ -1696,14 +1696,27 @@ async function sendWriteConfirm(id, allowed) {
 function showPgWriteConfirm({ id, tool, arguments: args }) {
   _pgConfirmId = id;
   let preview = `Tool: ${tool}\n\n`;
+  // Friendly preview: SQL for Postgres, message text for Telegram, JSON for others
   if (args.sql) {
     preview += args.sql;
+  } else if (tool === "telegram_send_message") {
+    preview += `To: ${args.chat_id}\n\n${args.text}`;
+    if (args.parse_mode) preview += `\n\n(parse_mode: ${args.parse_mode})`;
   } else {
     preview += JSON.stringify(args, null, 2);
   }
   pgWriteSqlEl.textContent = preview;
-  pgWriteWarning.textContent =
-    `⚠️ Model želi da izvrši "${tool}" na Postgres bazi. Pregledaj i potvrdi.`;
+
+  // Generic title and warning based on tool prefix
+  const titleEl = document.getElementById("pg-write-confirm-title");
+  if (tool.startsWith("telegram_")) {
+    if (titleEl) titleEl.textContent = "✈️ Telegram — potvrda slanja";
+    pgWriteWarning.textContent = `⚠️ Model želi da pošalje poruku via Telegram bot. Pregledaj sadržaj i potvrdi.`;
+  } else {
+    if (titleEl) titleEl.textContent = "⚠️ Postgres write operacija";
+    pgWriteWarning.textContent = `⚠️ Model želi da izvrši "${tool}" na Postgres bazi. Pregledaj i potvrdi.`;
+  }
+
   statusEl.textContent = "⚠️ Write potvrda potrebna…";
   pgWriteModal.classList.add("open");
 }
