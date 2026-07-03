@@ -17,8 +17,10 @@ import {
   getToolsForChat,
   routeToolCall,
   resultToText,
+  notifyServerActivity,
   POSTGRES_WRITE_TOOLS,
   EXEC_TOOLS,
+  FETCH_TOOLS,
 } from "./mcp/registry.js";
 
 const execAsync = promisify(exec);
@@ -34,6 +36,29 @@ const WORKSPACE_DIR = path.resolve(
   process.env.MCP_WORKSPACE_DIR || process.cwd()
 );
 
+
+// ── HTTP fetch config ────────────────────────────────────────────────────────
+
+/** Comma-separated list of allowed hostnames. Empty string = allow all. */
+const HTTP_ALLOWED_DOMAINS = (process.env.HTTP_ALLOWED_DOMAINS ?? "")
+  .split(",")
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean);
+
+const HTTP_MAX_BYTES = (parseInt(process.env.HTTP_MAX_RESPONSE_KB) || 50) * 1024;
+const HTTP_TIMEOUT_MS = 15_000;
+
+function isHttpDomainAllowed(url) {
+  if (HTTP_ALLOWED_DOMAINS.length === 0) return true;
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return HTTP_ALLOWED_DOMAINS.some(
+      (d) => hostname === d || hostname.endsWith("." + d)
+    );
+  } catch {
+    return false;
+  }
+}
 
 // ── Audit log ────────────────────────────────────────────────────────────────
 const AUDIT_LOG_PATH = path.join(
@@ -398,6 +423,73 @@ app.post("/api/chat/stream", async (req, res) => {
           sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: execResult } });
           messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(execResult) });
           continue; // ← skip routeToolCall below
+        }
+
+        // ── FETCH TOOLS: domain check → fetch → truncate → audit → continue ──
+        if (FETCH_TOOLS.has(tc.function.name)) {
+          const {
+            method = "GET",
+            url,
+            headers: reqHeaders = {},
+            body: reqBody,
+            timeout: reqTimeout,
+          } = args;
+
+          const t0 = Date.now();
+          let fetchResult;
+
+          if (!isHttpDomainAllowed(url)) {
+            const msg = `Domain not allowed: ${new URL(url).hostname}. Allowed: ${HTTP_ALLOWED_DOMAINS.join(", ")}`;
+            await writeAuditLog("HTTP_DENY", `${method} ${url} — ${msg}`);
+            fetchResult = { isError: true, content: [{ type: "text", text: msg }] };
+          } else {
+            const controller = new AbortController();
+            const timer = setTimeout(
+              () => controller.abort(),
+              Math.min(Number(reqTimeout) || HTTP_TIMEOUT_MS, 30_000)
+            );
+            try {
+              const fetchOpts = {
+                method,
+                headers: reqHeaders,
+                signal: controller.signal,
+              };
+              if (reqBody && ["POST", "PUT", "PATCH"].includes(method)) {
+                fetchOpts.body = reqBody;
+              }
+
+              const resp = await fetch(url, fetchOpts);
+              clearTimeout(timer);
+
+              const elapsed = Date.now() - t0;
+              const raw = await resp.text();
+              const bytes = Buffer.byteLength(raw, "utf8");
+              let body = raw;
+              let truncated = "";
+              if (bytes > HTTP_MAX_BYTES) {
+                body = raw.slice(0, HTTP_MAX_BYTES);
+                truncated = `\n\n[Response truncated: ${Math.round(bytes / 1024)}KB received, limit is ${Math.round(HTTP_MAX_BYTES / 1024)}KB]`;
+              }
+
+              await writeAuditLog(
+                "HTTP_REQ",
+                `${method} ${url} → ${resp.status} (${elapsed}ms, ${Math.round(bytes / 1024)}KB)`
+              );
+
+              const text = `HTTP ${resp.status} ${resp.statusText}\n\n${body}${truncated}`;
+              fetchResult = { content: [{ type: "text", text }] };
+              notifyServerActivity("fetch");
+            } catch (err) {
+              clearTimeout(timer);
+              const msg = err.name === "AbortError" ? `Request timed out (${HTTP_TIMEOUT_MS / 1000}s)` : err.message;
+              await writeAuditLog("HTTP_ERR", `${method} ${url} — ${msg}`);
+              fetchResult = { isError: true, content: [{ type: "text", text: msg }] };
+            }
+          }
+
+          sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: fetchResult } });
+          messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(fetchResult) });
+          continue; // skip routeToolCall
         }
 
         // ── For Postgres write tools: ask user confirmation before executing ──
