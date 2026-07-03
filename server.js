@@ -46,6 +46,65 @@ const WORKSPACE_DIR = path.resolve(
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 
+// ── Error notification ────────────────────────────────────────────────────────
+//
+// Sends a Telegram message when the server experiences a critical failure.
+// Requires TELEGRAM_ERROR_CHAT_ID (the chat_id that should receive alerts).
+// Uses the same bot token as the Telegram MCP tool (TELEGRAM_BOT_TOKEN).
+// Rate-limited to one notification per error type per 10 minutes.
+
+const TELEGRAM_ERROR_CHAT_ID = process.env.TELEGRAM_ERROR_CHAT_ID ?? "";
+const _ERROR_NOTIF_COOLDOWN_MS = 10 * 60 * 1000;
+const _errorNotifLastSent = new Map(); // errorType → last-sent timestamp
+
+async function sendErrorNotification(errorType, description) {
+  if (!TELEGRAM_BOT_TOKEN || !TELEGRAM_ERROR_CHAT_ID) return;
+  const now = Date.now();
+  if (now - (_errorNotifLastSent.get(errorType) ?? 0) < _ERROR_NOTIF_COOLDOWN_MS) return;
+  _errorNotifLastSent.set(errorType, now);
+
+  const ts = new Date().toISOString();
+  const text = `[Decursor] CRITICAL ERROR\nType: ${errorType}\nTime: ${ts}\n\n${description}`;
+  try {
+    const resp = await fetch(`${TELEGRAM_API}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: TELEGRAM_ERROR_CHAT_ID, text }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    const data = await resp.json();
+    await writeAuditLog(
+      "ERR_NOTIF",
+      `${errorType} — ${data.ok ? "sent" : "tg error: " + data.description}`
+    );
+  } catch (err) {
+    await writeAuditLog("ERR_NOTIF", `${errorType} — send failed: ${err.message}`);
+  }
+}
+
+// ── Critical process error handlers ─────────────────────────────────────────
+//
+// These cover the two ways a Node.js process can crash unexpectedly.
+// Both handlers attempt to send a notification then exit so the process
+// manager (e.g. Render, PM2) can restart the server.
+
+process.on("uncaughtException", (err) => {
+  const detail = (err.stack || err.message).split("\n").slice(0, 5).join("\n");
+  console.error("[CRASH] Uncaught exception:", err);
+  sendErrorNotification("uncaughtException", detail)
+    .catch(() => {})
+    .finally(() => process.exit(1));
+});
+
+process.on("unhandledRejection", (reason) => {
+  const r = reason instanceof Error ? reason : new Error(String(reason));
+  const detail = (r.stack || r.message).split("\n").slice(0, 5).join("\n");
+  console.error("[CRASH] Unhandled rejection:", reason);
+  sendErrorNotification("unhandledRejection", detail)
+    .catch(() => {})
+    .finally(() => process.exit(1));
+});
+
 // ── HTTP fetch config ────────────────────────────────────────────────────────
 
 /** Comma-separated list of allowed hostnames. Empty string = allow all. */
@@ -1163,7 +1222,7 @@ app.delete("/api/mcp/custom-servers/:id", async (req, res) => {
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 
-app.listen(PORT, async () => {
+const _httpServer = app.listen(PORT, async () => {
   console.log(`Decursor listening on port ${PORT}`);
   console.log(`Workspace: ${WORKSPACE_DIR}`);
 
@@ -1187,4 +1246,25 @@ app.listen(PORT, async () => {
   servers.forEach((s) =>
     console.log(`  • [${s.id}] ${s.name} — ${s.status}`)
   );
+
+  // 3. One-time database connectivity check — notify if any configured DB is unreachable
+  try {
+    const dbResults = await checkPostgresConnections();
+    const failed = dbResults.filter((r) => !r.ok);
+    if (failed.length > 0) {
+      const detail = failed.map((r) => `${r.name}: ${r.error}`).join("\n");
+      console.warn(`[CRITICAL] Database(s) unreachable at startup:\n${detail}`);
+      await sendErrorNotification("db_connect_failed", `Database(s) unreachable at startup:\n${detail}`);
+    }
+  } catch (dbCheckErr) {
+    console.warn(`DB startup check error: ${dbCheckErr.message}`);
+  }
+});
+
+// Notify if the HTTP server cannot bind to the port (e.g. EADDRINUSE)
+_httpServer.on("error", (err) => {
+  console.error("[CRITICAL] Server failed to start:", err.message);
+  sendErrorNotification("server_start_failed", `Cannot listen on port ${PORT}: ${err.message}`)
+    .catch(() => {})
+    .finally(() => process.exit(1));
 });
