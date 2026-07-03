@@ -20,6 +20,11 @@
 import path from "path";
 import { mkdirSync } from "fs";
 import { mcpClient, LazyMCPClient, resolveNpmServer, resultToText } from "./client.js";
+import {
+  loadCustomServerConfigs,
+  saveCustomServerConfigs,
+  buildClientFromConfig,
+} from "./custom-servers.js";
 
 export { resultToText };
 
@@ -32,6 +37,34 @@ const IDLE_MS = 5 * 60 * 1000; // 5 minutes
  * This is a constant — there is no runtime path that can disable this check.
  */
 export const EXEC_TOOLS = new Set(["run_command"]);
+
+// ── Destructive heuristic for custom (user-added) servers ────────────────────
+
+const DESTRUCTIVE_PARTS = new Set([
+  "delete", "remove", "drop", "destroy", "truncate",
+  "transfer", "send", "write", "execute", "kill",
+  "terminate", "purge", "drain", "revoke", "flush",
+  "wipe", "overwrite",
+]);
+
+/**
+ * Returns true when a tool should require confirmation based on its name
+ * keywords or the MCP-standard `destructiveHint` annotation.
+ * Applied automatically to all user-added (custom) servers.
+ */
+export function isDestructiveTool(toolName, annotations) {
+  if (annotations?.destructiveHint === true) return true;
+  const parts = toolName.toLowerCase().split(/[_\-\s]+/);
+  return parts.some((p) => DESTRUCTIVE_PARTS.has(p));
+}
+
+/** Runtime set of custom-server tool names that need confirmation. */
+const customDestructiveToolSet = new Set();
+
+/** Returns true if this tool (from a user-added server) needs confirmation. */
+export function isCustomDestructiveTool(name) {
+  return customDestructiveToolSet.has(name);
+}
 
 /**
  * Tool names handled by the fetch/HTTP virtual client.
@@ -185,7 +218,11 @@ export async function initRegistry(env, workspaceDir) {
   // ── Postgres — one server per DATABASE_URL / POSTGRES_n_URL ─────────────
   const postgresServers = buildPostgresServers(env);
 
-  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, telegramServer, fetchServer, terminalServer];
+  // ── User-added custom servers ──────────────────────────────────────────────
+  _customConfigs = await loadCustomServerConfigs();
+  const customClients = _customConfigs.map(buildClientFromConfig);
+
+  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, telegramServer, fetchServer, terminalServer, ...customClients];
 
   // Combine all for public access
   _allServers = [filesystemProxy, ...lazyServers];
@@ -193,6 +230,9 @@ export async function initRegistry(env, workspaceDir) {
 
 /** All servers (filesystem proxy + lazy servers). Set after initRegistry(). */
 let _allServers = [];
+
+/** Persisted configs for user-added servers. */
+let _customConfigs = [];
 
 // ── VirtualTelegramClient — Telegram Bot API, no child process ───────────────
 
@@ -557,6 +597,11 @@ export function getAllServersStatus() {
     if (s.type === "telegram") {
       base.type = "telegram";
     }
+    if (s.type === "custom") {
+      base.type = "custom";
+      base.removable = true;
+      base.transport = s._customConfig?.transport ?? "stdio";
+    }
     return base;
   });
 }
@@ -621,19 +666,93 @@ export async function getToolsForChat() {
       )
   );
 
-  // Aggregate tools, build routing table
+  // Aggregate tools, build routing table and custom destructive set
   toolRouter.clear();
+  customDestructiveToolSet.clear();
   const tools = [];
 
   for (const s of _allServers) {
     if (!s.enabled || s.notConfigured || !s.connected) continue;
     for (const t of s.getOpenAITools()) {
       toolRouter.set(t.function.name, s);
+      // Populate destructive set for custom servers using heuristic
+      if (s.type === "custom") {
+        const raw = s.tools.find((rt) => rt.name === t.function.name);
+        if (isDestructiveTool(t.function.name, raw?.annotations)) {
+          customDestructiveToolSet.add(t.function.name);
+        }
+      }
       tools.push(t);
     }
   }
 
   return tools;
+}
+
+/**
+ * Add a user-provided MCP server config, connect immediately, and persist.
+ * Returns {id, name, status, toolCount} or throws on connection failure.
+ * Times out after 30 seconds if the server doesn't respond.
+ */
+export async function addCustomServer(config) {
+  if (!config.id) config.id = `custom-${Date.now()}`;
+  config.addedAt = new Date().toISOString();
+  config.enabled = true;
+
+  const client = buildClientFromConfig(config);
+
+  // Connect with timeout
+  await Promise.race([
+    client.connect(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Connection timed out (30s)")), 30_000)
+    ),
+  ]);
+
+  // Register in runtime structures
+  _allServers.push(client);
+  lazyServers.push(client);
+  _customConfigs.push(config);
+
+  // Persist
+  await saveCustomServerConfigs(_customConfigs);
+
+  return {
+    id: config.id,
+    name: config.name,
+    status: client.status,
+    toolCount: client.tools.length,
+  };
+}
+
+/**
+ * Disconnect and permanently remove a user-added server.
+ * Returns true if found and removed, false if not found.
+ */
+export async function removeCustomServer(id) {
+  const idx = _allServers.findIndex((s) => s.id === id && s.type === "custom");
+  if (idx === -1) return false;
+
+  const client = _allServers[idx];
+
+  // Remove from routing and destructive set before disconnect
+  for (const tool of client.tools) {
+    toolRouter.delete(tool.name);
+    customDestructiveToolSet.delete(tool.name);
+  }
+
+  try {
+    await client.disconnect();
+  } catch {}
+
+  _allServers.splice(idx, 1);
+  const lazyIdx = lazyServers.indexOf(client);
+  if (lazyIdx !== -1) lazyServers.splice(lazyIdx, 1);
+
+  _customConfigs = _customConfigs.filter((c) => c.id !== id);
+  await saveCustomServerConfigs(_customConfigs);
+
+  return true;
 }
 
 /**

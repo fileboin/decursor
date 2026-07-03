@@ -1542,8 +1542,8 @@ document.getElementById("mcp-manage-btn").addEventListener("click", () => {
   openMcpModal("mcp-manage-modal");
   loadMcpServers();
 });
-document.getElementById("mcp-connect-btn").addEventListener("click",  () => openMcpModal("mcp-connect-modal"));
-document.getElementById("mcp-add-btn").addEventListener("click",      () => openMcpModal("mcp-connect-modal"));
+document.getElementById("mcp-connect-btn").addEventListener("click",  () => openMcpAddForm());
+document.getElementById("mcp-add-btn").addEventListener("click",      () => openMcpAddForm());
 document.getElementById("mcp-settings-btn").addEventListener("click", () => openMcpModal("mcp-settings-modal"));
 
 document.getElementById("mcp-manage-close-btn").addEventListener("click",  () => document.getElementById("mcp-manage-modal").classList.remove("open"));
@@ -1553,7 +1553,10 @@ document.getElementById("mcp-settings-close-btn").addEventListener("click",() =>
 document.getElementById("mcp-manage-refresh-btn").addEventListener("click", loadMcpServers);
 document.getElementById("mcp-manage-add-btn").addEventListener("click", () => {
   document.getElementById("mcp-manage-modal").classList.remove("open");
-  document.getElementById("mcp-connect-modal").classList.add("open");
+  openMcpAddForm();
+});
+document.getElementById("mcp-connect-cancel-btn").addEventListener("click", () => {
+  document.getElementById("mcp-connect-modal").classList.remove("open");
 });
 
 async function loadMcpServers() {
@@ -1597,6 +1600,11 @@ function buildMcpServerItem(server) {
     ? `<span class="mcp-confirm-badge" title="Svaka komanda zahtijeva eksplicitnu potvrdu korisnika — ovo se ne može isključiti">⚠️ Confirm Required</span>`
     : "";
 
+  // Remove button for custom (user-added) servers
+  const removeBtnHtml = server.removable
+    ? `<button class="secondary mcp-remove-server-btn" title="Ukloni server" style="font-size:11px;padding:3px 8px;min-height:unset;color:var(--diff-removed-fg);border-color:#6a2020;background:var(--diff-removed-bg);">🗑</button>`
+    : "";
+
   item.innerHTML = `
     <span class="mcp-server-icon">${server.icon}</span>
     <div class="mcp-server-meta">
@@ -1610,6 +1618,7 @@ function buildMcpServerItem(server) {
       <input type="checkbox" ${server.enabled ? "checked" : ""} ${server.type === "terminal" ? "disabled" : ""}/>
       <span class="dd-toggle-track"></span>
     </label>
+    ${removeBtnHtml}
   `;
 
   // Enable / disable toggle
@@ -1658,8 +1667,123 @@ function buildMcpServerItem(server) {
     });
   }
 
+  // Remove button (custom servers only)
+  const removeBtn = item.querySelector(".mcp-remove-server-btn");
+  if (removeBtn) {
+    removeBtn.addEventListener("click", async () => {
+      if (!confirm(`Ukloniti server "${server.name}"? Ova akcija je trajna.`)) return;
+      removeBtn.disabled = true;
+      try {
+        const r = await apiFetch(
+          `${BACKEND_BASE}/api/mcp/custom-servers/${server.id}`,
+          { method: "DELETE" }
+        );
+        if (!r.ok) {
+          const d = await r.json().catch(() => ({}));
+          throw new Error(d.error || r.statusText);
+        }
+        item.remove();
+        const list = document.getElementById("mcp-server-list");
+        if (!list.querySelector(".mcp-server-item")) {
+          list.innerHTML = '<p class="mcp-list-empty">Nema registrovanih MCP servera.</p>';
+        }
+      } catch (err) {
+        alert(`Greška pri uklanjanju: ${err.message}`);
+        removeBtn.disabled = false;
+      }
+    });
+  }
+
   return item;
 }
+
+// ── Add MCP Server form ──────────────────────────────────────────────────────
+
+function openMcpAddForm() {
+  // Reset form fields
+  document.getElementById("mcp-add-name").value = "";
+  document.getElementById("mcp-add-command").value = "";
+  document.getElementById("mcp-add-url").value = "";
+  document.getElementById("mcp-add-transport").value = "stdio";
+  document.getElementById("mcp-add-env-list").innerHTML = "";
+  document.getElementById("mcp-add-status").textContent = "";
+  document.getElementById("mcp-add-submit-btn").disabled = false;
+  document.getElementById("mcp-add-submit-btn").textContent = "⚡ Poveži i dodaj";
+  toggleTransportFields("stdio");
+  document.getElementById("mcp-connect-modal").classList.add("open");
+  setTimeout(() => document.getElementById("mcp-add-name").focus(), 80);
+}
+
+function toggleTransportFields(transport) {
+  document.getElementById("mcp-add-stdio-section").style.display =
+    transport === "stdio" ? "" : "none";
+  document.getElementById("mcp-add-sse-section").style.display =
+    transport === "sse" ? "" : "none";
+}
+
+document.getElementById("mcp-add-transport").addEventListener("change", (e) => {
+  toggleTransportFields(e.target.value);
+});
+
+document.getElementById("mcp-add-env-btn").addEventListener("click", () => {
+  const row = document.createElement("div");
+  row.className = "mcp-env-row";
+  row.innerHTML = `
+    <input type="text" class="mcp-env-key" placeholder="KEY" spellcheck="false" autocomplete="off" />
+    <input type="text" class="mcp-env-value" placeholder="value" spellcheck="false" autocomplete="off" />
+    <button class="secondary mcp-env-remove" type="button" style="font-size:11px;padding:3px 7px;min-height:unset;">✕</button>
+  `;
+  row.querySelector(".mcp-env-remove").addEventListener("click", () => row.remove());
+  document.getElementById("mcp-add-env-list").appendChild(row);
+  row.querySelector(".mcp-env-key").focus();
+});
+
+document.getElementById("mcp-add-submit-btn").addEventListener("click", async () => {
+  const name     = document.getElementById("mcp-add-name").value.trim();
+  const transport = document.getElementById("mcp-add-transport").value;
+  const command  = document.getElementById("mcp-add-command").value.trim();
+  const url      = document.getElementById("mcp-add-url").value.trim();
+  const statusEl2 = document.getElementById("mcp-add-status");
+  const submitBtn = document.getElementById("mcp-add-submit-btn");
+
+  if (!name) { statusEl2.textContent = "Unesite ime servera."; return; }
+  if (transport === "stdio" && !command) { statusEl2.textContent = "Unesite komandu."; return; }
+  if (transport === "sse"   && !url)     { statusEl2.textContent = "Unesite URL."; return; }
+
+  // Collect env vars
+  const env = {};
+  for (const row of document.getElementById("mcp-add-env-list").querySelectorAll(".mcp-env-row")) {
+    const k = row.querySelector(".mcp-env-key").value.trim();
+    const v = row.querySelector(".mcp-env-value").value;
+    if (k) env[k] = v;
+  }
+
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Povezujem…";
+  statusEl2.textContent = "";
+
+  try {
+    const res = await apiFetch(`${BACKEND_BASE}/api/mcp/custom-servers`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name, transport, command, url, env }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Nepoznata greška");
+
+    statusEl2.textContent = `✓ Dodato: ${data.name} — ${data.toolCount} tool(ova)`;
+    submitBtn.textContent = "✓ Dodato!";
+    setTimeout(() => {
+      document.getElementById("mcp-connect-modal").classList.remove("open");
+      document.getElementById("mcp-manage-modal").classList.add("open");
+      loadMcpServers();
+    }, 1200);
+  } catch (err) {
+    statusEl2.textContent = `Greška: ${err.message}`;
+    submitBtn.disabled = false;
+    submitBtn.textContent = "⚡ Poveži i dodaj";
+  }
+});
 
 // ── Postgres write confirmation modal ────────────────────────────────────────
 
