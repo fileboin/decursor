@@ -7,7 +7,15 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
-import { mcpClient, MCPClient } from "./mcp/client.js";
+import { mcpClient } from "./mcp/client.js";
+import {
+  initRegistry,
+  getAllServersStatus,
+  toggleServer,
+  getToolsForChat,
+  routeToolCall,
+  resultToText,
+} from "./mcp/registry.js";
 
 const execAsync = promisify(exec);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,21 +30,6 @@ const WORKSPACE_DIR = path.resolve(
   process.env.MCP_WORKSPACE_DIR || process.cwd()
 );
 
-// In-memory MCP server registry (extended in Faza 2+)
-const mcpRegistry = [
-  {
-    id: "filesystem",
-    name: "Filesystem",
-    icon: "📁",
-    description: "Čita i piše fajlove u workspace-u",
-    enabled: true,
-  },
-];
-
-function getActiveTools() {
-  const entry = mcpRegistry.find((s) => s.id === "filesystem");
-  return mcpClient.connected && entry?.enabled ? mcpClient.getOpenAITools() : [];
-}
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 
@@ -286,7 +279,7 @@ app.post("/api/chat/stream", async (req, res) => {
   } = req.body;
 
   const messages = [...(initMessages ?? [])];
-  const tools = getActiveTools();
+  const tools = await getToolsForChat();
   const MAX_ROUNDS = 8;
 
   try {
@@ -323,7 +316,7 @@ app.post("/api/chat/stream", async (req, res) => {
 
         let result;
         try {
-          result = await mcpClient.callTool(tc.function.name, args);
+          result = await routeToolCall(tc.function.name, args);
         } catch (err) {
           result = {
             isError: true,
@@ -343,7 +336,7 @@ app.post("/api/chat/stream", async (req, res) => {
         messages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: MCPClient.resultToText(result),
+          content: resultToText(result),
         });
       }
     }
@@ -487,28 +480,13 @@ app.post("/api/wordpress/publish", async (req, res) => {
 // ── MCP registry API ────────────────────────────────────────────────────────
 
 app.get("/api/mcp/servers", (req, res) => {
-  res.json(
-    mcpRegistry.map((s) => ({
-      ...s,
-      status:
-        s.id === "filesystem"
-          ? mcpClient.connected && s.enabled
-            ? "connected"
-            : "disconnected"
-          : "disconnected",
-    }))
-  );
+  res.json(getAllServersStatus());
 });
 
-app.post("/api/mcp/servers/:id/toggle", (req, res) => {
-  const entry = mcpRegistry.find((s) => s.id === req.params.id);
-  if (!entry) return res.status(404).json({ error: "Server not found" });
-  entry.enabled = !entry.enabled;
-  const status =
-    entry.id === "filesystem" && mcpClient.connected && entry.enabled
-      ? "connected"
-      : "disconnected";
-  res.json({ id: entry.id, enabled: entry.enabled, status });
+app.post("/api/mcp/servers/:id/toggle", async (req, res) => {
+  const result = await toggleServer(req.params.id);
+  if (!result) return res.status(404).json({ error: "Server not found" });
+  res.json(result);
 });
 
 // ── Boot ────────────────────────────────────────────────────────────────────
@@ -517,15 +495,20 @@ app.listen(PORT, async () => {
   console.log(`Decursor listening on port ${PORT}`);
   console.log(`Workspace: ${WORKSPACE_DIR}`);
 
+  // 1. Connect filesystem MCP server (eager, permanent)
   try {
     const tools = await mcpClient.connect(WORKSPACE_DIR);
-    console.log(
-      `MCP filesystem server connected — ${tools.length} tool(s) available:`
-    );
-    tools.forEach((t) => console.log(`  • ${t.name}: ${t.description}`));
+    console.log(`MCP [filesystem]: connected — ${tools.length} tool(s)`);
   } catch (err) {
-    console.warn(
-      `MCP filesystem server unavailable (${err.message}). Tool-calling disabled.`
-    );
+    console.warn(`MCP [filesystem]: unavailable — ${err.message}`);
   }
+
+  // 2. Initialize registry (lazy servers registered, not yet spawned)
+  await initRegistry(process.env, WORKSPACE_DIR);
+
+  const servers = getAllServersStatus();
+  console.log(`MCP registry: ${servers.length} server(s) registered`);
+  servers.forEach((s) =>
+    console.log(`  • [${s.id}] ${s.name} — ${s.status}`)
+  );
 });
