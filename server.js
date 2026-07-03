@@ -7,14 +7,17 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { exec } from "child_process";
 import { promisify } from "util";
+import { randomUUID } from "crypto";
 import { mcpClient } from "./mcp/client.js";
 import {
   initRegistry,
   getAllServersStatus,
   toggleServer,
+  toggleWriteMode,
   getToolsForChat,
   routeToolCall,
   resultToText,
+  POSTGRES_WRITE_TOOLS,
 } from "./mcp/registry.js";
 
 const execAsync = promisify(exec);
@@ -30,6 +33,23 @@ const WORKSPACE_DIR = path.resolve(
   process.env.MCP_WORKSPACE_DIR || process.cwd()
 );
 
+
+// ── Postgres write-confirmation state ───────────────────────────────────────
+// Map of confirmId → {resolve, reject} — populated during SSE streams
+const pendingWriteConfirms = new Map();
+
+function waitForWriteConfirm(id, timeoutMs = 120_000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      pendingWriteConfirms.delete(id);
+      reject(new Error("Write confirmation timed out"));
+    }, timeoutMs);
+    pendingWriteConfirms.set(id, {
+      allow: () => { clearTimeout(timer); resolve(); },
+      deny:  () => { clearTimeout(timer); reject(new Error("User denied")); },
+    });
+  });
+}
 
 // ── Middleware ──────────────────────────────────────────────────────────────
 
@@ -314,6 +334,35 @@ app.post("/api/chat/stream", async (req, res) => {
           tool_call: { id: tc.id, name: tc.function.name, arguments: args },
         });
 
+        // For Postgres write tools: ask user confirmation before executing
+        if (POSTGRES_WRITE_TOOLS.has(tc.function.name)) {
+          const confirmId = randomUUID();
+          sseWrite(res, {
+            write_confirm: {
+              id: confirmId,
+              tool: tc.function.name,
+              arguments: args,
+            },
+          });
+          try {
+            await waitForWriteConfirm(confirmId);
+          } catch (err) {
+            sseWrite(res, {
+              tool_result: {
+                tool_call_id: tc.id,
+                name: tc.function.name,
+                result: { isError: true, content: [{ type: "text", text: err.message }] },
+              },
+            });
+            messages.push({
+              role: "tool",
+              tool_call_id: tc.id,
+              content: `Execution cancelled: ${err.message}`,
+            });
+            continue;
+          }
+        }
+
         let result;
         try {
           result = await routeToolCall(tc.function.name, args);
@@ -486,6 +535,22 @@ app.get("/api/mcp/servers", (req, res) => {
 app.post("/api/mcp/servers/:id/toggle", async (req, res) => {
   const result = await toggleServer(req.params.id);
   if (!result) return res.status(404).json({ error: "Server not found" });
+  res.json(result);
+});
+
+// Resolve or deny a pending Postgres write confirmation
+app.post("/api/mcp/write-confirm/:id", (req, res) => {
+  const pending = pendingWriteConfirms.get(req.params.id);
+  if (!pending) return res.status(404).json({ error: "Confirmation not found or expired" });
+  pendingWriteConfirms.delete(req.params.id);
+  req.body.allowed ? pending.allow() : pending.deny();
+  res.json({ ok: true });
+});
+
+// Toggle write-mode for a Postgres MCP server
+app.post("/api/mcp/servers/:id/write-mode", async (req, res) => {
+  const result = await toggleWriteMode(req.params.id);
+  if (!result) return res.status(404).json({ error: "Postgres server not found" });
   res.json(result);
 });
 

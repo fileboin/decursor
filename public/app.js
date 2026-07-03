@@ -859,6 +859,9 @@ async function sendChat() {
             if (parsed.tool_result) {
               statusEl.textContent = "Čekam odgovor…";
             }
+            if (parsed.write_confirm) {
+              showPgWriteConfirm(parsed.write_confirm);
+            }
             if (parsed.error) {
               fullText = fullText
                 ? fullText + `\n\n[Greška: ${parsed.error}]`
@@ -1576,12 +1579,21 @@ function buildMcpServerItem(server) {
   item.className = "mcp-server-item";
   item.dataset.serverId = server.id;
 
+  // Build write-mode badge markup for postgres servers
+  const writeBadgeHtml = server.type === "postgres"
+    ? `<span class="mcp-write-badge ${server.writeMode ? "write-on" : "readonly"}"
+         title="Klikni da toggleuješ write mode">
+         ${server.writeMode ? "✏️ Write" : "📖 Read-only"}
+       </span>`
+    : "";
+
   item.innerHTML = `
     <span class="mcp-server-icon">${server.icon}</span>
     <div class="mcp-server-meta">
       <div class="mcp-server-name">${server.name}</div>
       <div class="mcp-server-desc">${server.description}</div>
     </div>
+    ${writeBadgeHtml}
     <span class="mcp-status-badge mcp-status-${server.status}">${MCP_STATUS_LABEL[server.status] ?? server.status}</span>
     <label class="dd-toggle-switch" title="${server.enabled ? "Isključi" : "Uključi"}">
       <input type="checkbox" ${server.enabled ? "checked" : ""}/>
@@ -1589,6 +1601,7 @@ function buildMcpServerItem(server) {
     </label>
   `;
 
+  // Enable / disable toggle
   const toggle = item.querySelector("input[type=checkbox]");
   toggle.addEventListener("change", async () => {
     toggle.disabled = true;
@@ -1607,7 +1620,82 @@ function buildMcpServerItem(server) {
     }
   });
 
+  // Write-mode badge click (postgres only)
+  const writeBadge = item.querySelector(".mcp-write-badge");
+  if (writeBadge) {
+    writeBadge.addEventListener("click", async () => {
+      writeBadge.style.opacity = "0.5";
+      try {
+        const r = await apiFetch(
+          `${BACKEND_BASE}/api/mcp/servers/${server.id}/write-mode`,
+          { method: "POST" }
+        );
+        const updated = await r.json();
+        writeBadge.className = `mcp-write-badge ${updated.writeMode ? "write-on" : "readonly"}`;
+        writeBadge.textContent = updated.writeMode ? "✏️ Write" : "📖 Read-only";
+        const statusBadge = item.querySelector(".mcp-status-badge");
+        statusBadge.className = `mcp-status-badge mcp-status-${updated.status}`;
+        statusBadge.textContent = MCP_STATUS_LABEL[updated.status] ?? updated.status;
+        const desc = item.querySelector(".mcp-server-desc");
+        if (desc) desc.textContent = item.querySelector(".mcp-server-desc").textContent
+          .replace(/(read-only|write)$/, updated.writeMode ? "write" : "read-only");
+      } catch (err) {
+        alert(`Greška: ${err.message}`);
+      } finally {
+        writeBadge.style.opacity = "";
+      }
+    });
+  }
+
   return item;
+}
+
+// ── Postgres write confirmation modal ────────────────────────────────────────
+
+const pgWriteModal   = document.getElementById("pg-write-confirm-modal");
+const pgWriteSqlEl   = document.getElementById("pg-write-confirm-sql");
+const pgWriteWarning = document.getElementById("pg-write-warning");
+let _pgConfirmId = null;
+
+document.getElementById("pg-write-allow-btn").addEventListener("click", () => {
+  if (!_pgConfirmId) return;
+  sendWriteConfirm(_pgConfirmId, true);
+});
+document.getElementById("pg-write-deny-btn").addEventListener("click", () => {
+  if (!_pgConfirmId) return;
+  sendWriteConfirm(_pgConfirmId, false);
+});
+pgWriteModal.addEventListener("click", (e) => {
+  if (e.target === pgWriteModal) sendWriteConfirm(_pgConfirmId, false);
+});
+
+async function sendWriteConfirm(id, allowed) {
+  _pgConfirmId = null;
+  pgWriteModal.classList.remove("open");
+  if (!id) return;
+  try {
+    await apiFetch(`${BACKEND_BASE}/api/mcp/write-confirm/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ allowed }),
+    });
+  } catch (_) { /* server handles timeout */ }
+}
+
+function showPgWriteConfirm({ id, tool, arguments: args }) {
+  _pgConfirmId = id;
+  // Format a readable SQL/operation preview
+  let preview = `Tool: ${tool}\n\n`;
+  if (args.sql) {
+    preview += args.sql;
+  } else {
+    preview += JSON.stringify(args, null, 2);
+  }
+  pgWriteSqlEl.textContent = preview;
+  pgWriteWarning.textContent =
+    `⚠️ Model želi da izvrši "${tool}" na Postgres bazi. Pregledaj i potvrdi.`;
+  statusEl.textContent = "⚠️ Write potvrda potrebna…";
+  pgWriteModal.classList.add("open");
 }
 
 document.getElementById("wp-draft-save-btn").addEventListener("click", async () => {
