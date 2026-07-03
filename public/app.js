@@ -853,6 +853,12 @@ async function sendChat() {
               streamSpan.textContent = fullText + "▌";
               chatLog.scrollTop = chatLog.scrollHeight;
             }
+            if (parsed.tool_call) {
+              statusEl.textContent = `🔧 ${parsed.tool_call.name}…`;
+            }
+            if (parsed.tool_result) {
+              statusEl.textContent = "Čekam odgovor…";
+            }
             if (parsed.error) {
               fullText = fullText
                 ? fullText + `\n\n[Greška: ${parsed.error}]`
