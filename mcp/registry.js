@@ -1,15 +1,21 @@
 /**
  * Central MCP server registry.
  *
- * Manages all MCP servers (filesystem + 4 lightweight servers added in Faza 2).
- *
- * Lifecycle:
+ * Manages all MCP servers:
  *   - filesystem  → eager permanent connection on initRegistry()
- *   - git/github/memory/brave-search → lazy: child process spawns at the
- *     start of each /api/chat/stream request (parallel), auto-disconnects
- *     after DEFAULT_IDLE_MS of inactivity.
+ *   - git/github/memory/brave-search → lazy (Faza 2)
+ *   - postgres-*  → lazy, one entry per DATABASE_URL / POSTGRES_n_URL (Faza 3)
+ *
+ * Lifecycle (lazy servers):
+ *   - Child process spawns at start of each /api/chat/stream request (parallel)
+ *   - Auto-disconnects after IDLE_MS of inactivity
  *   - toggle OFF  → immediate disconnect (child process killed)
  *   - toggle ON   → sets enabled=true; child spawns on next chat request
+ *
+ * Write-mode (postgres only):
+ *   - writeMode=false → spawned with DB_READ_ONLY=true  (default)
+ *   - writeMode=true  → spawned with DB_READ_ONLY=false
+ *   - toggleWriteMode(id) → disconnect + flip state; server respawns lazily
  */
 import path from "path";
 import { mkdirSync } from "fs";
@@ -139,7 +145,10 @@ export async function initRegistry(env, workspaceDir) {
     },
   });
 
-  lazyServers = [gitServer, githubServer, memoryServer, braveServer];
+  // ── Postgres — one server per DATABASE_URL / POSTGRES_n_URL ─────────────
+  const postgresServers = buildPostgresServers(env);
+
+  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers];
 
   // Combine all for public access
   _allServers = [filesystemProxy, ...lazyServers];
@@ -148,18 +157,110 @@ export async function initRegistry(env, workspaceDir) {
 /** All servers (filesystem proxy + lazy servers). Set after initRegistry(). */
 let _allServers = [];
 
+// ── Postgres helpers ─────────────────────────────────────────────────────────
+
+/**
+ * MCP write tools — these require user confirmation before execution.
+ * Exposed so server.js can check without importing mcp-postgres internals.
+ */
+export const POSTGRES_WRITE_TOOLS = new Set([
+  "insert_data",
+  "update_data",
+  "delete_data",
+  "execute_raw_query",
+  "create_table",
+  "alter_table",
+]);
+
+/**
+ * Build LazyMCPClient instances for each Postgres connection defined in env.
+ *
+ * Reads:
+ *   DATABASE_URL          → id "postgres", name "Postgres"
+ *   POSTGRES_2_URL        → id "postgres-2", name from POSTGRES_2_NAME or "Postgres 2"
+ *   POSTGRES_3_URL / NAME → id "postgres-3" …  (up to index 9)
+ */
+function buildPostgresServers(env) {
+  const entries = [];
+
+  // Primary connection
+  if (env.DATABASE_URL) {
+    entries.push({ id: "postgres", name: "Postgres", url: env.DATABASE_URL });
+  }
+
+  // Additional connections: POSTGRES_2_URL … POSTGRES_9_URL
+  for (let i = 2; i <= 9; i++) {
+    const url = env[`POSTGRES_${i}_URL`];
+    if (!url) continue;
+    const name = env[`POSTGRES_${i}_NAME`] || `Postgres ${i}`;
+    entries.push({ id: `postgres-${i}`, name, url });
+  }
+
+  return entries.map(({ id, name, url }) => {
+    const server = new LazyMCPClient({
+      id,
+      name,
+      icon: "🐘",
+      description: `${new URL(url).hostname} · read-only`,
+      enabled: true,
+      notConfigured: false,
+      idleMs: IDLE_MS,
+      spawnConfig: async () => {
+        const serverPath = await resolveNpmServer("mcp-postgres");
+        return {
+          command: "node",
+          args: [serverPath],
+          env: {
+            DATABASE_URL: url,
+            DB_READ_ONLY: server._writeMode ? "false" : "true",
+            DB_STATEMENT_TIMEOUT: "30000",
+          },
+        };
+      },
+    });
+    // Extra state for Postgres servers
+    server._writeMode = false;
+    server._pgUrl = url;
+    server.type = "postgres";
+    return server;
+  });
+}
+
 // ── Public API ───────────────────────────────────────────────────────────────
 
 /** For GET /api/mcp/servers */
 export function getAllServersStatus() {
-  return _allServers.map((s) => ({
-    id:          s.id,
-    name:        s.name,
-    icon:        s.icon,
-    description: s.description,
-    enabled:     s.enabled,
-    status:      s.status,
-  }));
+  return _allServers.map((s) => {
+    const base = {
+      id:          s.id,
+      name:        s.name,
+      icon:        s.icon,
+      description: s.description,
+      enabled:     s.enabled,
+      status:      s.status,
+    };
+    if (s.type === "postgres") {
+      base.type = "postgres";
+      base.writeMode = s._writeMode === true;
+      // Update description to reflect current mode
+      base.description = `${new URL(s._pgUrl).hostname} · ${s._writeMode ? "write" : "read-only"}`;
+    }
+    return base;
+  });
+}
+
+/**
+ * Toggle write-mode for a Postgres server.
+ * Disconnects immediately so it respawns with the new DB_READ_ONLY value on
+ * the next chat request.
+ */
+export async function toggleWriteMode(id) {
+  const s = _allServers.find((s) => s.id === id && s.type === "postgres");
+  if (!s) return null;
+  s._writeMode = !s._writeMode;
+  s.description = `${new URL(s._pgUrl).hostname} · ${s._writeMode ? "write" : "read-only"}`;
+  if (s.connected) await s.disconnect(); // respawns lazily with updated DB_READ_ONLY
+  return { id: s.id, writeMode: s._writeMode, status: s.status };
 }
 
 /**

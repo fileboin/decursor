@@ -1360,6 +1360,95 @@
     min-width: 0;
   }
 
+  /* ── Postgres write-confirm modal ── */
+  #pg-write-confirm-modal {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.72);
+    align-items: center;
+    justify-content: center;
+    z-index: 2100;
+    padding: 12px;
+  }
+  #pg-write-confirm-modal.open { display: flex; }
+  #pg-write-confirm-content {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    width: 92%;
+    max-width: 640px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    max-height: 82vh;
+    max-height: 82dvh;
+    overflow: hidden;
+  }
+  #pg-write-confirm-content h2 { margin: 0; font-size: 15px; }
+  #pg-write-warning {
+    font-size: 12px;
+    color: var(--diff-removed-fg);
+    background: var(--diff-removed-bg);
+    border: 1px solid #6a2020;
+    border-radius: 4px;
+    padding: 7px 10px;
+    margin: 0;
+  }
+  #pg-write-confirm-sql {
+    background: var(--exec-cmd-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px 12px;
+    font-family: "Consolas", "Courier New", monospace;
+    font-size: 12px;
+    color: var(--exec-cmd-fg);
+    white-space: pre-wrap;
+    word-break: break-all;
+    flex: 1;
+    overflow-y: auto;
+    min-height: 60px;
+    max-height: 280px;
+  }
+  #pg-write-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  #pg-write-allow-btn {
+    background: var(--diff-removed-bg);
+    color: var(--diff-removed-fg);
+    border: 1px solid #6a2020;
+  }
+  #pg-write-allow-btn:hover { background: #3a1010; color: var(--diff-removed-fg); }
+
+  /* Write-mode badge inside Manage MCP panel (postgres rows) */
+  .mcp-write-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    white-space: nowrap;
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .mcp-write-badge.readonly {
+    background: var(--input-bg);
+    color: var(--text);
+    opacity: 0.65;
+    border-color: var(--border);
+  }
+  .mcp-write-badge.write-on {
+    background: var(--diff-removed-bg);
+    color: var(--diff-removed-fg);
+    border-color: #6a2020;
+  }
+  .mcp-write-badge:hover { opacity: 1; }
+
   /* ── MCP modals — mobile ── */
   @media (max-width: 768px) {
     #mcp-manage-modal,
@@ -1376,6 +1465,14 @@
       border-radius: 12px 12px 0 0;
       padding: 24px 20px 32px;
     }
+    #pg-write-confirm-modal { align-items: flex-end; padding: 0; }
+    #pg-write-confirm-content {
+      width: 100%; max-width: 100%;
+      border-radius: 12px 12px 0 0;
+      max-height: 90vh; max-height: 90dvh;
+    }
+    #pg-write-confirm-actions { flex-direction: column; }
+    #pg-write-confirm-actions button { width: 100%; }
   }
 </style>
 </head>
@@ -1681,6 +1778,19 @@
     <h2>⚙ MCP Settings</h2>
     <p>Uskoro — globalne opcije za MCP integraciju</p>
     <button id="mcp-settings-close-btn">Zatvori</button>
+  </div>
+</div>
+
+<!-- Postgres write-confirm modal -->
+<div id="pg-write-confirm-modal">
+  <div id="pg-write-confirm-content">
+    <h2>⚠️ Postgres write operacija</h2>
+    <p id="pg-write-warning">Model želi da izvrši write operaciju na bazi. Pregledaj SQL i potvrdi.</p>
+    <pre id="pg-write-confirm-sql"></pre>
+    <div id="pg-write-confirm-actions">
+      <button id="pg-write-allow-btn">⚠️ Dozvoli izvršenje</button>
+      <button class="secondary" id="pg-write-deny-btn">✗ Odbaci</button>
+    </div>
   </div>
 </div>
 
