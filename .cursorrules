@@ -1,0 +1,59 @@
+# Cursor Agent Rules — Snapshot Safety Protocol
+
+## OBAVEZNO pre svake veće izmene
+
+Pre nego što počneš bilo koju od sledećih akcija:
+- Nova faza razvoja ili nova feature
+- Refaktoring koji dira više fajlova
+- Bug fix koji menja logiku u više fajlova
+- Izmena arhitekture (routing, middleware, struktura foldera)
+- Promena zavisnosti (package.json, mcp konfiguracija)
+
+**UVEK napravi snapshot tag** koristeći sledeću komandu:
+
+```bash
+./scripts/snapshot.sh <kratak-opis-zadatka>
+# primer:
+./scripts/snapshot.sh add-user-auth
+./scripts/snapshot.sh refactor-routing
+./scripts/snapshot.sh fix-chat-memory
+```
+
+Ili ručno:
+```bash
+git tag snapshot/pre-<opis>-$(date +%Y-%m-%d) HEAD
+git push origin snapshot/pre-<opis>-$(date +%Y-%m-%d)
+```
+
+## Format taga
+
+```
+snapshot/pre-[opis-zadatka]-[YYYY-MM-DD]
+```
+
+Primeri:
+- `snapshot/pre-add-user-auth-2026-07-03`
+- `snapshot/pre-refactor-server-2026-07-15`
+- `snapshot/pre-fix-chat-history-2026-08-01`
+
+## Rollback komanda
+
+Ako nešto pođe po zlu, korisnik se vraća ovako:
+
+```bash
+# Pogledaj dostupne snapshotove:
+git tag -l "snapshot/*"
+
+# Vrati se na snapshot (samo za pregled, bez brisanja izmena):
+git checkout snapshot/pre-<naziv>
+
+# Ili hard reset main brancha na snapshot (PAŽNJA: briše izmene!):
+git checkout main
+git reset --hard snapshot/pre-<naziv>
+```
+
+## Pravilo za Cloud Agenta
+
+- Javi korisniku ime taga pre nego što počneš sa izmenama
+- Ako zadatak nije manji od 2 fajla, uvek napravi tag
+- Tagove pushovati na remote zajedno sa prvim commitom izmene
