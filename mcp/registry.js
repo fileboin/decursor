@@ -39,6 +39,20 @@ export const EXEC_TOOLS = new Set(["run_command"]);
  */
 export const FETCH_TOOLS = new Set(["http_request"]);
 
+/**
+ * All Telegram tool names — intercepted by server.js before routeToolCall().
+ */
+export const TELEGRAM_TOOLS = new Set([
+  "telegram_send_message",
+  "telegram_get_webhook_info",
+  "telegram_get_updates",
+]);
+
+/**
+ * Telegram tools that require explicit user confirmation (write actions).
+ */
+export const TELEGRAM_WRITE_TOOLS = new Set(["telegram_send_message"]);
+
 // ── Registry singleton ───────────────────────────────────────────────────────
 
 /** @type {LazyMCPClient[]} */
@@ -159,6 +173,9 @@ export async function initRegistry(env, workspaceDir) {
     },
   });
 
+  // ── Telegram — virtual client, no child process ───────────────────────────
+  const telegramServer = new VirtualTelegramClient(env.TELEGRAM_BOT_TOKEN || "");
+
   // ── Fetch/HTTP — virtual client, no child process ────────────────────────
   const fetchServer = new VirtualFetchClient();
 
@@ -168,7 +185,7 @@ export async function initRegistry(env, workspaceDir) {
   // ── Postgres — one server per DATABASE_URL / POSTGRES_n_URL ─────────────
   const postgresServers = buildPostgresServers(env);
 
-  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, fetchServer, terminalServer];
+  lazyServers = [gitServer, githubServer, memoryServer, braveServer, ...postgresServers, telegramServer, fetchServer, terminalServer];
 
   // Combine all for public access
   _allServers = [filesystemProxy, ...lazyServers];
@@ -176,6 +193,102 @@ export async function initRegistry(env, workspaceDir) {
 
 /** All servers (filesystem proxy + lazy servers). Set after initRegistry(). */
 let _allServers = [];
+
+// ── VirtualTelegramClient — Telegram Bot API, no child process ───────────────
+
+/**
+ * Provides Telegram tools without spawning any process.
+ * Uses native fetch to call https://api.telegram.org/bot{TOKEN}/...
+ * Read tools execute directly; write tools are intercepted by server.js
+ * and require explicit user confirmation before execution.
+ */
+class VirtualTelegramClient {
+  constructor(botToken) {
+    this.id          = "telegram";
+    this.name        = "Telegram";
+    this.icon        = "✈️";
+    this.description = "Telegram Bot API — pošalji poruku, provjeri webhook, čitaj updates";
+    this.enabled     = !!botToken;
+    this.notConfigured = !botToken;
+    this.type        = "telegram";
+    this._status     = "disconnected";
+    this._idleTimer  = null;
+
+    this.tools = [
+      {
+        name: "telegram_send_message",
+        description:
+          "Send a text message to a Telegram chat or channel. " +
+          "Requires explicit user confirmation before sending. " +
+          "chat_id can be a numeric ID or a @username.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            chat_id: { type: "string", description: "Target chat ID or @username" },
+            text:    { type: "string", description: "Message text to send" },
+            parse_mode: {
+              type: "string",
+              enum: ["HTML", "Markdown", "MarkdownV2"],
+              description: "Optional text formatting mode",
+            },
+          },
+          required: ["chat_id", "text"],
+        },
+      },
+      {
+        name: "telegram_get_webhook_info",
+        description: "Get current webhook configuration status for the bot.",
+        inputSchema: { type: "object", properties: {}, required: [] },
+      },
+      {
+        name: "telegram_get_updates",
+        description:
+          "Retrieve the latest incoming updates (messages, callbacks, etc.) via long-polling. " +
+          "Returns up to `limit` updates (default 10). " +
+          "Pass `offset` = last_update_id + 1 to acknowledge previous updates.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            limit:  { type: "number", description: "Max updates to return (1–100, default 10)" },
+            offset: { type: "number", description: "Update offset for pagination" },
+          },
+          required: [],
+        },
+      },
+    ];
+  }
+
+  get connected() { return !this.notConfigured; } // always callable if configured
+  get status()    { return this.notConfigured ? "not_configured" : this._status; }
+
+  async connect()    { /* no-op */ }
+  async disconnect() { this._clearIdleTimer(); this._status = "disconnected"; }
+
+  markActive() {
+    this._status = "connected";
+    this._clearIdleTimer();
+    this._idleTimer = setTimeout(() => {
+      this._status = "disconnected";
+      this._idleTimer = null;
+    }, FETCH_IDLE_MS); // reuse same 5-min constant
+    if (this._idleTimer.unref) this._idleTimer.unref();
+  }
+
+  _clearIdleTimer() {
+    if (this._idleTimer) { clearTimeout(this._idleTimer); this._idleTimer = null; }
+  }
+
+  getOpenAITools() {
+    return this.tools.map((t) => ({
+      type: "function",
+      function: { name: t.name, description: t.description, parameters: t.inputSchema },
+    }));
+  }
+
+  async callTool() {
+    throw new Error("Telegram tool calls must be intercepted by server.js before reaching callTool()");
+  }
+}
 
 // ── VirtualFetchClient — HTTP client, no child process ──────────────────────
 
@@ -440,6 +553,9 @@ export function getAllServersStatus() {
     }
     if (s.type === "fetch") {
       base.type = "fetch";
+    }
+    if (s.type === "telegram") {
+      base.type = "telegram";
     }
     return base;
   });
