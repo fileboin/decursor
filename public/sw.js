@@ -1,4 +1,4 @@
-const CACHE_NAME = 'decursor-v1';
+const CACHE_NAME = 'decursor-v2';
 const STATIC_ASSETS = [
   '/',
   '/index.html',
