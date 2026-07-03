@@ -18,6 +18,9 @@ import {
   routeToolCall,
   resultToText,
   notifyServerActivity,
+  isCustomDestructiveTool,
+  addCustomServer,
+  removeCustomServer,
   POSTGRES_WRITE_TOOLS,
   EXEC_TOOLS,
   FETCH_TOOLS,
@@ -564,6 +567,22 @@ app.post("/api/chat/stream", async (req, res) => {
           continue; // skip routeToolCall
         }
 
+        // ── Custom server destructive heuristic: confirm before executing ────
+        if (isCustomDestructiveTool(tc.function.name)) {
+          const confirmId = randomUUID();
+          sseWrite(res, {
+            write_confirm: { id: confirmId, tool: tc.function.name, arguments: args },
+          });
+          try {
+            await waitForWriteConfirm(confirmId);
+          } catch (err) {
+            const denied = { isError: true, content: [{ type: "text", text: err.message }] };
+            sseWrite(res, { tool_result: { tool_call_id: tc.id, name: tc.function.name, result: denied } });
+            messages.push({ role: "tool", tool_call_id: tc.id, content: resultToText(denied) });
+            continue;
+          }
+        }
+
         // ── For Postgres write tools: ask user confirmation before executing ──
         if (POSTGRES_WRITE_TOOLS.has(tc.function.name)) {
           const confirmId = randomUUID();
@@ -796,6 +815,29 @@ app.post("/api/mcp/servers/:id/write-mode", async (req, res) => {
   const result = await toggleWriteMode(req.params.id);
   if (!result) return res.status(404).json({ error: "Postgres server not found" });
   res.json(result);
+});
+
+// ── Custom MCP server management ────────────────────────────────────────────
+
+app.post("/api/mcp/custom-servers", async (req, res) => {
+  const { name, transport = "stdio", command, url, env = {} } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: "name is required" });
+  if (transport === "stdio" && !command?.trim())
+    return res.status(400).json({ error: "command is required for stdio transport" });
+  if (transport === "sse" && !url?.trim())
+    return res.status(400).json({ error: "url is required for sse transport" });
+  try {
+    const result = await addCustomServer({ name: name.trim(), transport, command, url, env });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/mcp/custom-servers/:id", async (req, res) => {
+  const ok = await removeCustomServer(req.params.id);
+  if (!ok) return res.status(404).json({ error: "Custom server not found" });
+  res.json({ ok: true });
 });
 
 // ── Boot ────────────────────────────────────────────────────────────────────

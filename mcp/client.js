@@ -143,13 +143,22 @@ export class LazyMCPClient {
     this._status = "connecting";
     this._errorMsg = null;
     try {
-      const { command, args, env: extraEnv = {} } =
-        await this._spawnConfig();
-      this._transport = new StdioClientTransport({
-        command,
-        args,
-        env: { ...process.env, ...extraEnv },
-      });
+      const cfg = await this._spawnConfig();
+
+      // Support both stdio (child process) and SSE (remote HTTP) transports
+      if (cfg.type === "sse") {
+        const { SSEClientTransport } = await import(
+          "@modelcontextprotocol/sdk/client/sse.js"
+        );
+        this._transport = new SSEClientTransport(new URL(cfg.url));
+      } else {
+        this._transport = new StdioClientTransport({
+          command: cfg.command,
+          args: cfg.args ?? [],
+          env: { ...process.env, ...(cfg.env ?? {}) },
+        });
+      }
+
       this._client = new Client(
         { name: "decursor", version: "1.0.0" },
         { capabilities: {} }
