@@ -814,6 +814,121 @@
     margin-left: auto;
   }
 
+  /* ── Chat input row (textarea + icon buttons) ── */
+  #chat-input-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  #chat-input-row #chat-input {
+    flex: 1;
+    min-width: 0;
+  }
+  .chat-icon-btn {
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--panel);
+    color: var(--fg);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.75;
+    transition: opacity 0.15s, background 0.15s;
+  }
+  .chat-icon-btn:hover {
+    opacity: 1;
+    background: var(--btn-blue-bg);
+    color: var(--btn-blue-fg);
+    border-color: var(--btn-blue-border);
+  }
+  .chat-icon-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  /* Mic button pulsing while recording */
+  @keyframes mic-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(220, 50, 50, 0.55); }
+    50%       { box-shadow: 0 0 0 6px rgba(220, 50, 50, 0); }
+  }
+  .chat-icon-btn.recording {
+    background: #dc3232;
+    color: #fff;
+    border-color: #b42222;
+    opacity: 1;
+    animation: mic-pulse 1s ease-in-out infinite;
+  }
+
+  /* Thumbnail preview bar above chat input */
+  #chat-attachment-preview {
+    display: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 2px 0;
+  }
+  #chat-attachment-preview.has-items {
+    display: flex;
+  }
+  .chat-thumb-wrap {
+    position: relative;
+    display: inline-flex;
+  }
+  .chat-thumb-img {
+    width: 56px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+  }
+  .chat-thumb-remove {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #dc3232;
+    color: #fff;
+    border: none;
+    font-size: 10px;
+    line-height: 16px;
+    text-align: center;
+    cursor: pointer;
+    padding: 0;
+  }
+  .chat-text-attach-tag {
+    font-size: 11px;
+    background: var(--btn-blue-bg);
+    color: var(--btn-blue-fg);
+    border: 1px solid var(--btn-blue-border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 160px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .chat-text-attach-tag button {
+    background: none;
+    border: none;
+    color: inherit;
+    cursor: pointer;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+
   /* GitHub modal */
   #github-modal {
     display: none;
@@ -1714,7 +1829,19 @@
     <div id="chat-log"></div>
     <div id="chat-input-area">
       <div id="selected-files-info"></div>
-      <textarea id="chat-input" placeholder="Pitaj AI nešto o kodu..."></textarea>
+      <!-- Thumbnail / text-file attachment preview -->
+      <div id="chat-attachment-preview"></div>
+      <!-- Textarea + icon buttons row -->
+      <div id="chat-input-row">
+        <button id="chat-upload-btn" class="chat-icon-btn" title="Priloži fajl (tekst ili sliku)">📎</button>
+        <button id="chat-camera-btn" class="chat-icon-btn" title="Slikaj fotografiju kamerom">📷</button>
+        <button id="chat-mic-btn" class="chat-icon-btn" title="Govor u tekst" style="display:none">🎤</button>
+        <textarea id="chat-input" placeholder="Pitaj AI nešto o kodu..."></textarea>
+      </div>
+      <!-- Hidden file inputs -->
+      <input type="file" id="chat-file-input" style="display:none"
+        accept=".js,.ts,.jsx,.tsx,.mjs,.cjs,.txt,.md,.mdx,.json,.jsonc,.css,.scss,.less,.html,.htm,.xml,.yaml,.yml,.toml,.ini,.cfg,.env,.py,.rb,.go,.rs,.java,.c,.cpp,.h,.hpp,.sh,.bash,.zsh,.sql,.php,.vue,.svelte,.graphql,.gql,.csv,.log,.diff,.patch,.jpg,.jpeg,.png,.webp,.gif">
+      <input type="file" id="chat-camera-input" style="display:none" accept="image/*" capture="environment">
       <div id="chat-controls">
         <label class="toggle">
           <input type="checkbox" id="include-context" checked />

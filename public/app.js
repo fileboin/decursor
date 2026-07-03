@@ -8,6 +8,11 @@ let lastMessageHadContext = false; // tracks whether last user msg included edit
 let currentOpenFilePath = null; // workspace-relative path of the currently open file
 const selectedFiles = new Set(); // workspace-relative paths checked for multi-file context
 
+// ---------- Chat attachment state ----------
+// Each entry: { type: "image", dataUrl, mimeType, filename }
+//           | { type: "text", content, filename }
+let chatAttachments = [];
+
 // ---------- Auth ----------
 let accessKey = "";
 {
@@ -345,7 +350,8 @@ async function populateModels() {
     const models = await res.json();
     if (!Array.isArray(models) || models.length === 0) throw new Error("Nema dostupnih modela");
 
-    // Sort: free models first, then alphabetically by name — no filtering
+    // Sort: free models first, then alphabetically by name — no filtering.
+    // Keep full model object including modality for vision detection.
     allModels = models.slice().sort((a, b) => {
       const aFree = a.id.includes(":free");
       const bFree = b.id.includes(":free");
@@ -382,12 +388,284 @@ modelSelect.addEventListener("change", () => {
 providerSelect.addEventListener("change", populateModels);
 populateModels();
 
+/**
+ * Returns true if the currently selected model is known to accept image inputs.
+ *
+ * For OpenRouter: uses the `modality` field returned by /api/models
+ * (e.g. "text+image->text" contains "image").
+ * For Ollama: heuristic match against common vision model name patterns.
+ */
+function currentModelSupportsVision() {
+  const provider = selectedProvider || providerSelect.value;
+  const modelId = getSelectedModel().toLowerCase();
+  if (!modelId) return false;
+
+  if (provider === "openrouter") {
+    const meta = allModels.find((m) => m.id === getSelectedModel());
+    if (meta?.modality) return meta.modality.includes("image");
+    // Fallback heuristic for models loaded via fallback input
+    return (
+      modelId.includes("vision") ||
+      modelId.includes("gpt-4o") ||
+      modelId.includes("claude-3") ||
+      modelId.includes("gemini") ||
+      modelId.includes("pixtral") ||
+      modelId.includes("llava") ||
+      modelId.includes("qwen-vl") ||
+      modelId.includes("qwen2.5-vl") ||
+      modelId.includes("internvl")
+    );
+  }
+
+  if (provider === "ollama") {
+    return (
+      modelId.includes("llava") ||
+      modelId.includes("bakllava") ||
+      modelId.includes("moondream") ||
+      modelId.includes("minicpm-v") ||
+      modelId.includes("vision") ||
+      modelId.includes("qwen2.5-vl") ||
+      modelId.includes("qwen-vl") ||
+      modelId.includes("internvl")
+    );
+  }
+
+  return false;
+}
+
 // ---------- Chat ----------
 const chatLog = document.getElementById("chat-log");
 const chatInput = document.getElementById("chat-input");
 const sendBtn = document.getElementById("send-btn");
 const includeContext = document.getElementById("include-context");
 const statusEl = document.getElementById("status");
+
+// ---------- Chat attachment UI ----------
+
+const attachmentPreview = document.getElementById("chat-attachment-preview");
+const chatFileInput = document.getElementById("chat-file-input");
+const chatCameraInput = document.getElementById("chat-camera-input");
+const chatUploadBtn = document.getElementById("chat-upload-btn");
+const chatCameraBtn = document.getElementById("chat-camera-btn");
+const chatMicBtn = document.getElementById("chat-mic-btn");
+
+const IMAGE_EXTS = new Set(["jpg", "jpeg", "png", "webp", "gif"]);
+const IMAGE_MIME_PREFIX = "image/";
+
+/** Rebuild the attachment preview bar from `chatAttachments`. */
+function renderAttachmentPreview() {
+  attachmentPreview.innerHTML = "";
+  if (chatAttachments.length === 0) {
+    attachmentPreview.classList.remove("has-items");
+    return;
+  }
+  attachmentPreview.classList.add("has-items");
+
+  chatAttachments.forEach((att, idx) => {
+    if (att.type === "image") {
+      const wrap = document.createElement("div");
+      wrap.className = "chat-thumb-wrap";
+
+      const img = document.createElement("img");
+      img.className = "chat-thumb-img";
+      img.src = att.dataUrl;
+      img.alt = att.filename;
+      img.title = att.filename;
+      wrap.appendChild(img);
+
+      const rmBtn = document.createElement("button");
+      rmBtn.className = "chat-thumb-remove";
+      rmBtn.textContent = "×";
+      rmBtn.title = "Ukloni sliku";
+      rmBtn.addEventListener("click", () => {
+        chatAttachments.splice(idx, 1);
+        renderAttachmentPreview();
+      });
+      wrap.appendChild(rmBtn);
+      attachmentPreview.appendChild(wrap);
+    } else {
+      const tag = document.createElement("div");
+      tag.className = "chat-text-attach-tag";
+      tag.title = att.filename;
+      tag.textContent = `📄 ${att.filename}`;
+
+      const rmBtn = document.createElement("button");
+      rmBtn.textContent = "×";
+      rmBtn.title = "Ukloni prilog";
+      rmBtn.addEventListener("click", () => {
+        chatAttachments.splice(idx, 1);
+        renderAttachmentPreview();
+      });
+      tag.appendChild(rmBtn);
+      attachmentPreview.appendChild(tag);
+    }
+  });
+}
+
+/**
+ * Process a File object selected via upload or camera.
+ * Images → stored as base64 data URL in chatAttachments.
+ * Text files → read as text and stored in chatAttachments.
+ */
+function processAttachedFile(file) {
+  const ext = (file.name.split(".").pop() || "").toLowerCase();
+  const isImage = IMAGE_EXTS.has(ext) || file.type.startsWith(IMAGE_MIME_PREFIX);
+
+  const reader = new FileReader();
+
+  if (isImage) {
+    reader.onload = (e) => {
+      chatAttachments.push({
+        type: "image",
+        dataUrl: e.target.result,
+        mimeType: file.type || "image/jpeg",
+        filename: file.name,
+      });
+      renderAttachmentPreview();
+    };
+    reader.readAsDataURL(file);
+  } else {
+    reader.onload = (e) => {
+      chatAttachments.push({
+        type: "text",
+        content: e.target.result,
+        filename: file.name,
+      });
+      renderAttachmentPreview();
+    };
+    reader.readAsText(file);
+  }
+}
+
+// Upload button → open file picker
+chatUploadBtn.addEventListener("click", () => {
+  chatFileInput.value = "";
+  chatFileInput.click();
+});
+chatFileInput.addEventListener("change", () => {
+  if (chatFileInput.files && chatFileInput.files.length > 0) {
+    processAttachedFile(chatFileInput.files[0]);
+  }
+});
+
+// Camera button → open camera input
+chatCameraBtn.addEventListener("click", () => {
+  chatCameraInput.value = "";
+  chatCameraInput.click();
+});
+chatCameraInput.addEventListener("change", () => {
+  if (chatCameraInput.files && chatCameraInput.files.length > 0) {
+    processAttachedFile(chatCameraInput.files[0]);
+  }
+});
+
+// ---------- Voice-to-text ----------
+
+(function initVoice() {
+  const SpeechRecognition =
+    window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    // Not supported — keep the mic button hidden (already hidden via style="display:none")
+    return;
+  }
+
+  // Show the mic button now that we know the API is available
+  chatMicBtn.style.display = "";
+
+  const recognition = new SpeechRecognition();
+  // Language preference list. hr-HR is listed first because Google Cloud STT (used by Chrome)
+  // supports it reliably on Android, and it is mutually intelligible with Bosnian/Serbian.
+  // bs-BA and sr-RS may not be in the STT engine on all devices/regions.
+  // The code cycles through candidates if `language-not-supported` is returned.
+  const LANG_CANDIDATES = ["hr-HR", "bs-BA", "sr-RS", "en-US"];
+  let langIdx = 0;
+
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 1;
+
+  let isRecording = false;
+  let baseText = ""; // text in input before recording started
+
+  function setRecording(active) {
+    isRecording = active;
+    if (active) {
+      chatMicBtn.classList.add("recording");
+      chatMicBtn.title = "Zaustavi snimanje";
+    } else {
+      chatMicBtn.classList.remove("recording");
+      chatMicBtn.title = "Govor u tekst";
+    }
+  }
+
+  function startRecognition() {
+    recognition.lang = LANG_CANDIDATES[langIdx] || "en-US";
+    try {
+      recognition.start();
+      setRecording(true);
+    } catch (_) {
+      setRecording(false);
+    }
+  }
+
+  recognition.onresult = (e) => {
+    let interim = "";
+    let final = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        final += t;
+      } else {
+        interim += t;
+      }
+    }
+    if (final) {
+      baseText += (baseText && !baseText.endsWith(" ") ? " " : "") + final.trim();
+      chatInput.value = baseText;
+    } else {
+      chatInput.value = baseText + (baseText && interim ? " " : "") + interim;
+    }
+    chatInput.selectionStart = chatInput.selectionEnd = chatInput.value.length;
+  };
+
+  recognition.onerror = (e) => {
+    setRecording(false);
+    if (e.error === "language-not-supported") {
+      // Try the next language candidate silently
+      langIdx = (langIdx + 1) % LANG_CANDIDATES.length;
+      if (langIdx !== 0) {
+        baseText = chatInput.value;
+        startRecognition();
+        return;
+      }
+      appendMessage("assistant", "⚠️ Ni jedan od podržanih govornih jezika nije dostupan na ovom uređaju.");
+    } else if (e.error === "not-allowed") {
+      appendMessage("assistant", "⚠️ Pristup mikrofonu je odbijen. Dozvoli pristup mikrofonu u postavkama browsera.");
+    } else if (e.error === "network") {
+      appendMessage("assistant", "⚠️ Prepoznavanje govora nije dostupno — server za prepoznavanje nije dostupan. Na Huawei uređajima bez Google usluga (GMS) ova funkcija ne radi. Pokušaj na uređaju s Google Chrome i GMS podrškom.");
+    } else if (e.error === "no-speech") {
+      // Silent timeout — nothing to report
+    } else {
+      appendMessage("assistant", `⚠️ Greška prepoznavanja govora: ${e.error}`);
+    }
+  };
+
+  recognition.onend = () => {
+    setRecording(false);
+  };
+
+  chatMicBtn.addEventListener("click", () => {
+    if (isRecording) {
+      recognition.stop();
+      setRecording(false);
+      return;
+    }
+    langIdx = 0;
+    baseText = chatInput.value;
+    startRecognition();
+  });
+})();
 
 function appendMessage(role, content) {
   const div = document.createElement("div");
@@ -764,20 +1042,87 @@ function renderAssistantMessage(content, hadContext) {
 
 async function sendChat() {
   const userText = chatInput.value.trim();
-  if (!userText) return;
+  const imageAttachments = chatAttachments.filter((a) => a.type === "image");
+  const textAttachments = chatAttachments.filter((a) => a.type === "text");
 
-  let finalUserContent = userText;
+  // Require either text or at least one attachment
+  if (!userText && chatAttachments.length === 0) return;
+
+  const provider = selectedProvider || providerSelect.value;
+  const model = getSelectedModel();
+  const ollamaUrl = localStorage.getItem("decursor_ollama_url") || "";
+
+  // Block image send if model doesn't support vision
+  if (imageAttachments.length > 0 && !currentModelSupportsVision()) {
+    appendMessage(
+      "assistant",
+      `⚠️ Trenutno izabrani model (**${model || "(nepoznat)"}**) ne podržava slike (nema vision/multimodal sposobnost).\n\nIzaberi model koji podržava slike (npr. GPT-4o, Claude 3, Gemini 1.5, LLaVA) ili ukloni priložene slike.`
+    );
+    return;
+  }
+
+  // ── Build user message content ──────────────────────────────────────────────
+  let finalUserContent;
   const hasContext = includeContext.checked && !!editor;
-  if (hasContext) {
-    const code = editor.getValue();
-    const filename = document.getElementById("filename-input").value || "untitled";
-    finalUserContent = `Fajl: ${filename}\n\`\`\`\n${code}\n\`\`\`\n\nPitanje: ${userText}`;
+
+  if (imageAttachments.length > 0) {
+    // Multi-part content array (OpenAI vision format, compatible with Ollama 0.2+)
+    const parts = [];
+
+    let textPart = userText || "";
+    if (hasContext) {
+      const code = editor.getValue();
+      const filename = document.getElementById("filename-input").value || "untitled";
+      textPart = `Fajl: ${filename}\n\`\`\`\n${code}\n\`\`\`\n\n${textPart ? `Pitanje: ${textPart}` : "Analiziraj priloženu sliku u kontekstu ovog koda."}`;
+    }
+    if (textPart) parts.push({ type: "text", text: textPart });
+
+    for (const img of imageAttachments) {
+      parts.push({ type: "image_url", image_url: { url: img.dataUrl } });
+    }
+
+    finalUserContent = parts;
+  } else {
+    // Plain text message (existing behaviour)
+    finalUserContent = userText;
+    if (hasContext) {
+      const code = editor.getValue();
+      const filename = document.getElementById("filename-input").value || "untitled";
+      finalUserContent = `Fajl: ${filename}\n\`\`\`\n${code}\n\`\`\`\n\nPitanje: ${userText}`;
+    }
   }
 
   lastMessageHadContext = hasContext;
-  appendMessage("user", userText);
+
+  // Render user message in chat log (show text + image thumbs)
+  const userMsgDiv = document.createElement("div");
+  userMsgDiv.className = "msg user";
+  const userLabel = document.createElement("div");
+  userLabel.className = "role-label";
+  userLabel.textContent = "Ti";
+  userMsgDiv.appendChild(userLabel);
+  if (userText) {
+    const span = document.createElement("span");
+    span.textContent = userText;
+    userMsgDiv.appendChild(span);
+  }
+  for (const img of imageAttachments) {
+    const thumb = document.createElement("img");
+    thumb.src = img.dataUrl;
+    thumb.alt = img.filename;
+    thumb.style.cssText = "max-width:160px;max-height:120px;border-radius:4px;display:block;margin-top:4px;";
+    userMsgDiv.appendChild(thumb);
+  }
+  chatLog.appendChild(userMsgDiv);
+  chatLog.scrollTop = chatLog.scrollHeight;
+
   chatHistory.push({ role: "user", content: finalUserContent });
   chatInput.value = "";
+
+  // Clear attachments from preview
+  chatAttachments = [];
+  renderAttachmentPreview();
+
   sendBtn.disabled = true;
   statusEl.textContent = "Čekam odgovor...";
 
@@ -795,30 +1140,31 @@ async function sendChat() {
   chatLog.appendChild(assistantDiv);
   chatLog.scrollTop = chatLog.scrollHeight;
 
-  const provider = selectedProvider || providerSelect.value;
-  const model = getSelectedModel();
-  const ollamaUrl = localStorage.getItem("decursor_ollama_url") || "";
-
-  // Build system messages from selected files
+  // Build prefix messages: selected workspace files + uploaded text files
   const selectedFilesList = [...selectedFiles];
   let prefixMessages = [];
-  if (selectedFilesList.length > 0) {
-    const fileContents = [];
-    for (const fp of selectedFilesList) {
-      try {
-        const fRes = await apiFetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(fp)}`);
-        if (fRes.ok) {
-          const content = await fRes.text();
-          fileContents.push(`### ${fp}\n\`\`\`\n${content}\n\`\`\``);
-        }
-      } catch (_) { /* skip unreadable files */ }
-    }
-    if (fileContents.length > 0) {
-      prefixMessages = [{
-        role: "system",
-        content: `Kontekst selektovanih fajlova:\n\n${fileContents.join("\n\n")}`,
-      }];
-    }
+  const allFileContents = [];
+
+  for (const fp of selectedFilesList) {
+    try {
+      const fRes = await apiFetch(`${BACKEND_BASE}/api/files/read?path=${encodeURIComponent(fp)}`);
+      if (fRes.ok) {
+        const content = await fRes.text();
+        allFileContents.push(`### ${fp}\n\`\`\`\n${content}\n\`\`\``);
+      }
+    } catch (_) { /* skip unreadable files */ }
+  }
+
+  for (const ta of textAttachments) {
+    const ext = ta.filename.split(".").pop() || "";
+    allFileContents.push(`### ${ta.filename}\n\`\`\`${ext}\n${ta.content}\n\`\`\``);
+  }
+
+  if (allFileContents.length > 0) {
+    prefixMessages = [{
+      role: "system",
+      content: `Kontekst selektovanih fajlova:\n\n${allFileContents.join("\n\n")}`,
+    }];
   }
 
   let fullText = "";
