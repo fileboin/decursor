@@ -206,9 +206,14 @@ app.get("/api/models", async (req, res) => {
         headers: { Authorization: `Bearer ${OPENROUTER_KEY}` },
       });
       const data = await r.json();
-      // Returns {id, name} objects — frontend sorts free models first and filters by search.
+      // Returns {id, name, modality} objects — frontend sorts free models first and filters by search.
+      // modality comes from architecture.modality e.g. "text+image->text" for vision models.
       // NIKAD ne filtriraj/ograničavaj listu modela sa OpenRouter-a.
-      return res.json((data.data ?? []).map((m) => ({ id: m.id, name: m.name || m.id })));
+      return res.json((data.data ?? []).map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        modality: m.architecture?.modality ?? "",
+      })));
     }
     if (provider === "ollama") {
       const base = ollamaUrl || OLLAMA_URL;
