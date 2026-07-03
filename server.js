@@ -414,6 +414,25 @@ app.use(
   rateLimit({ windowMs: 60_000, max: 200, standardHeaders: true, legacyHeaders: false })
 );
 
+// Per-endpoint stricter limits to prevent runaway costs (e.g. tool-call loops).
+const chatStreamLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) =>
+    res.status(429).json({ error: "Previše zahteva, sačekaj malo." }),
+});
+
+const completeLimiter = rateLimit({
+  windowMs: 60_000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (_req, res) =>
+    res.status(429).json({ completion: null, error: "Previše zahteva, sačekaj malo." }),
+});
+
 function requireAuth(req, res, next) {
   if (!ACCESS_KEY) return next();
   if (req.headers["x-decursor-key"] !== ACCESS_KEY)
@@ -510,7 +529,7 @@ app.get("/api/models", async (req, res) => {
 
 // ── Inline code completion (Monacopilot) ─────────────────────────────────────
 
-app.post("/api/complete", async (req, res) => {
+app.post("/api/complete", completeLimiter, async (req, res) => {
   const { completionMetadata } = req.body || {};
   if (!completionMetadata) return res.json({ completion: null });
 
@@ -700,7 +719,7 @@ async function streamOllama(messages, model, ollamaUrl, tools, res) {
   return { finishReason, tcAcc };
 }
 
-app.post("/api/chat/stream", async (req, res) => {
+app.post("/api/chat/stream", chatStreamLimiter, async (req, res) => {
   sseInit(res);
 
   const {
